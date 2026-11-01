@@ -2,5 +2,8 @@
 # ~1.8 GB. Kept as a sibling checkout for citation; never committed here.
 /src/
 
+# GOTS WinTAK installers (~344 MB, public-release but never committed here)
+/WinTAK-CIV_5/
+
 # macOS junk
 .DS_Store

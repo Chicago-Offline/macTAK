@@ -1,0 +1,6 @@
+# Evidence clone: nested upstream git repo (deptofdefense/AndroidTacticalAssaultKit-CIV @ 889eee2),
+# ~1.8 GB. Kept as a sibling checkout for citation; never committed here.
+/src/
+
+# macOS junk
+.DS_Store

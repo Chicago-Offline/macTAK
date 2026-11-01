@@ -52,7 +52,9 @@ Gradle builds each sub-project for **either** Android (AAR) **or** desktop Java 
 
 ### C++ platform branching (`engine/src/main/cpp/CMakeLists.txt`)
 
-`AndroidSources.cmake` · `LinuxSources.cmake` · **`MacOSSources.cmake`** (`elseif(APPLE)` branch) · `WindowsSources.cmake` · `CommonSources.cmake`.
+`if(WIN32) → elseif(ANDROID) → elseif(APPLE) → elseif(UNIX)`, each combining `CommonSources.cmake` with one of `WindowsSources.cmake` · `AndroidSources.cmake` · **`MacOSSources.cmake`** · `LinuxSources.cmake` (per-platform `DEFS/LIBS/INCS/SRCS/HEADERS`; files live in `cpp/cmake/`, mirrored for JNI in `jni/cmake/`).
+
+**Linux is a compile target, not a product.** The `elseif(UNIX)` branch is real and maintained — `takkernel/VERSION.md` logs GCC 4.8.x compile fixes and even a "mitigate observed inconsistent loading of `libjawt` on linux hosts" fix (i.e., the desktop-Java `jre` host was exercised on Linux internally) — but no Linux client has ever shipped from it. In the TAK ecosystem Linux is the *server* platform (TAK Server on RHEL; community FreeTAKServer) and the CI build host; the only desktop client products are Windows (WinTAK) and the closed TAKX.
 
 `MacOSSources.cmake` (verbatim substance): `DEFS = RTTI_ENABLED, TE_GLES_VERSION=3, SQLITE_HAS_CODEC`; `LIBS = GLESv2` (via a **`GLES-stub`** lib-dir slot) `+ spatialite, gdal, geos, geos_c, charset, proj, z, las, las_c`. I.e., the macOS engine build already exists on paper, consuming GL ES 3 through a replaceable stub library.
 

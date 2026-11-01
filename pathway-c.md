@@ -52,7 +52,7 @@ License: **GPL-3.0** propagates to any port of this tree; plan publication at fi
 
 ## 6. Prior art (from ecosystem research, verified before clone)
 
-- **No macOS-native TAK client exists** — official or community (GitHub API + Wikipedia verification; tak.gov/DDG fetches blocked). Pathway C would be the first.
+- **No macOS-native TAK client exists** — official or community (GitHub API + Wikipedia verification; tak.gov/DDG fetches blocked) — and **no Linux desktop client either**: Linux is TAK's server platform (TAK Server on RHEL, community FreeTAKServer) and CI build host, with WebTAK in the browser as the only cross-platform client. Pathway C would be the first native client outside Windows/Android/iOS.
 - **WinTAK** — Windows-only, closed GOTS (the TAKX/knowledge that takkernel's `java` target serves a desktop client is in-tree corroboration: takkernel README names TAKX explicitly).
 - **FreeTAKServer** (Python, server), **WebTAK/FTS-UI** (browser), **pytak** (Python CoT lib), **thebentern/Tak.Client** (C# console) — servers/libraries, not native clients.
 - **flighttactics/TAKTracker** (MIT, Swift) — an iPhone CoT *tracker* with no map client; the one salvageable artifact: working CoT-over-SSL reference using Apple networking/location APIs. G1 cross-reference.

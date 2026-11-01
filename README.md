@@ -35,7 +35,7 @@
 
 ## Why this is de-risked (the five decisive findings)
 
-1. **The engine was already ported off Android once.** `takkernel/engine` has four platform source files (`AndroidSources.cmake`, `LinuxSources.cmake`, `MacOSSources.cmake`, `WindowsSources.cmake`) and a dual Gradle target (`-PkernelBuildTarget=java|android`) — the `java` target is what builds **TAKX**, TAK's closed Windows desktop client. A macOS port is the third lap of a proven route, not a first ascent.
+1. **The engine was already ported off Android once.** `takkernel/engine` has four platform source files (`AndroidSources.cmake`, `LinuxSources.cmake`, `MacOSSources.cmake`, `WindowsSources.cmake`) and a dual Gradle target (`-PkernelBuildTarget=java|android`) — the `java` target is what builds **TAKX**, TAK's closed desktop client (the shipped desktop product line is Windows' WinTAK; the kernel's desktop-Java host also carries Linux compile fixes, but no Linux client ever shipped). A macOS port is the third lap of a proven route, not a first ascent.
 2. **macOS slots already exist in the build system** (`MacOSSources.cmake`, `macos-64.mk`, commo's Xcode project). They are stale/unmaintained, but they define the contracts to fill.
 3. **The renderer risk is contained by architecture.** Engine C++ is context-agnostic (7 GLES-including files; 0 EGL outside Android); the macOS branch consumes GL ES through a `GLES-stub` link slot → substitute **ANGLE on Metal** (ES 2/3 + EGL 1.5, the same backend Chromium ships on macOS).
 4. **The engine's Android surface is tiny** — 5,424 LOC of Android-specific Java vs 186,804 platform-neutral LOC. Desktop equivalents (jre: JOGL, AWT cert store, `AtakMapView`) already exist.

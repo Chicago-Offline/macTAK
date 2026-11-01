@@ -82,3 +82,5 @@ cmake -S takkernel/engine/src/main/cpp -B /tmp/takeng -DCMAKE_BUILD_TYPE=RelWith
 cd takkernel && ../../gradlew publishToMavenLocal -PkernelBuildTarget=java
 ```
 
+CI & QA infrastructure (what runs, where, and why): see `ci-qa.md` — Tier 1 (`jvm-tests`, `native-engine`, `lint`) lands with this spike; `native-engine` is R1's scored signal.
+

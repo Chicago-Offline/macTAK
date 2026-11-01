@@ -48,6 +48,7 @@
 | `architecture.md` | Verified repo layout, LOC inventory, dependency graph, build/CI reality, third-party stack |
 | `pathway-c.md` | Deep dive: host strategy (JVM vs native Swift), renderer mapping, risk register, prior art |
 | `roadmap.md` | Gate-gated plan G0–G6 with exit criteria, spike checklist, fallback decision points |
+| `ci-qa.md` | CI/QA infrastructure plan: inherited test corpus, CI tiers, runner strategy, golden-fixture/render/perf harness |
 
 `src/` contains the cloned evidence tree (do not modify; pin all citations to `889eee2`).
 

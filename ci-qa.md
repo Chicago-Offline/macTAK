@@ -48,7 +48,7 @@ Branch protection: Tier 1 statuses required to merge. During the spike itself `n
 
 The dev Mac also hosts the CI jobs that licensing forces there. VMPal's CI model maps onto GitHub Actions directly:
 
-- **Golden VMs**, prepared once, kept shut down: a Windows VM with WinTAK installed (VMPal signs clones in automatically with its kept password), optionally an Ubuntu VM for FTS soak tests. Each job **clones** the golden (copy-on-write disk share — cheap), runs in the clone, deletes the clone.
+- **Golden VMs**, prepared once, kept shut down: a Windows VM with WinTAK installed (VMPal signs clones in automatically with its kept password), optionally an Ubuntu VM for FTS soak tests. Each job **clones** the golden (copy-on-write disk share — cheap), runs in the clone, deletes the clone. **First golden exists (2026-11-01):** `wintak-baseline` — Windows 11 24H2 ARM64 + WinTAK-CIV 5.8.0.149, Direct3D 12 off (WinTAK exits silently with it on), snapshot `golden-wintak`; build record and gotchas in `pathway-a.md`.
 - **Runner:** GitHub's self-hosted runner as the user's LaunchAgent, labeled `runs-on: [self-hosted, macOS, ARM64]`; job steps shell out to `vmpal run "Golden WinTAK" --copy-in .:src --copy-out out:./out -- …`; the command's exit status is the job status; upload `out/` with `if: always()`.
 - **Limits:** at most two macOS VMs concurrently on one Mac (memory/CPUs permitting); keep the Mac from sleeping.
 - **Policy:** self-hosted jobs never gate PRs — a dev Mac must not block merges. Nightly/weekly/manual dispatch only.

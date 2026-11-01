@@ -49,11 +49,12 @@
 | `pathway-c.md` | Deep dive: host strategy (JVM vs native Swift), renderer mapping, risk register, prior art |
 | `roadmap.md` | Gate-gated plan G0–G6 with exit criteria, spike checklist, fallback decision points |
 | `ci-qa.md` | CI/QA infrastructure plan: inherited test corpus, CI tiers, runner strategy, golden-fixture/render/perf harness |
+| `pathway-a.md` | Pathway A baseline: the WinTAK-in-VM golden image — build record, smoke test, gotchas, CI use |
 
 `src/` contains the cloned evidence tree (do not modify; pin all citations to `889eee2`).
 
-## Optional follow-ups (not started)
+## Follow-ups
 
-- **macOS arm64 build spike**: attempt `cmake` of `takkernel/engine` with `MacOSSources.cmake` + Homebrew/vcpkg deps; the single highest-information 2-week experiment.
-- **Pathway A fidelity baseline**: run WinTAK-in-VM or ATAK-in-Android-emulator (VMPal) to capture the reference UX for parity rungs.
+- **macOS arm64 build spike** (not started): attempt `cmake` of `takkernel/engine` with `MacOSSources.cmake` + Homebrew/vcpkg deps; the single highest-information 2-week experiment.
+- **Pathway A fidelity baseline** — **done 2026-11-01**: WinTAK-CIV 5.8.0.149 golden VM (`wintak-baseline`, snapshot `golden-wintak`) built and smoke-tested under VMPal; see `pathway-a.md`. Feeds `ci-qa.md` §5 and the G6 parity rungs.
 

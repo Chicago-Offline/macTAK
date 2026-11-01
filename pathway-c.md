@@ -57,7 +57,7 @@ License: **GPL-3.0** propagates to any port of this tree; plan publication at fi
 - **FreeTAKServer** (Python, server), **WebTAK/FTS-UI** (browser), **pytak** (Python CoT lib), **thebentern/Tak.Client** (C# console) — servers/libraries, not native clients.
 - **flighttactics/TAKTracker** (MIT, Swift) — an iPhone CoT *tracker* with no map client; the one salvageable artifact: working CoT-over-SSL reference using Apple networking/location APIs. G1 cross-reference.
 - **kentnf/iTAK** — plant-genomics red herring; no public iTAK source (iTAK itself is Android, closed).
-- Real-world macOS TAK usage today = **Pathway A**: WinTAK under Parallels or ATAK in an Android emulator — the contrast baseline and the fidelity reference for parity rungs.
+- Real-world macOS TAK usage today = **Pathway A**: WinTAK under Parallels or ATAK in an Android emulator — the contrast baseline and the fidelity reference for parity rungs (baseline captured 2026-11-01: `pathway-a.md`).
 
 ## 7. Bottom line
 

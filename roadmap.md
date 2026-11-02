@@ -78,7 +78,7 @@ Reference evidence exists (2026-11-02): a full-display capture of the WinTAK gol
 ## Spike checklist (copy-paste start)
 
 ```sh
-cd atak-macos-port-research/src
+cd macTAK/src
 git submodule update --init --recursive        # stl-soft + khronos registries (all public)
 # deps via Homebrew for spike: proj geos gdal libspatialite laszip
 export CMAKE_OSX_ARCHITECTURES=arm64

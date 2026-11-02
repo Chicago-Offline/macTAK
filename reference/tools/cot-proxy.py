@@ -5,13 +5,17 @@ VMPal publishes container ports on 127.0.0.1 only, so the bridged WinTAK VM
 (<vm-ip>) cannot reach FTS via the Mac's LAN address (<mac-lan-ip>). This
 forwards <mac-lan-ip>:8089 -> 127.0.0.1:8089 (FreeTAKServer CoT TCP).
 
-Usage: python3 cot-proxy.py [local_ip] [local_port] [target_port]
+Usage: python3 cot-proxy.py <mac-lan-ip> [local_port] [target_port]
 """
 import socket
 import sys
 import threading
 
-LOCAL_BIND = (sys.argv[1] if len(sys.argv) > 1 else "<mac-lan-ip>",
+if len(sys.argv) < 2:
+    sys.exit("usage: cot-proxy.py <mac-lan-ip> [local_port] [target_port]\n"
+             "Binds <mac-lan-ip>:<local_port> -> 127.0.0.1:<target_port>")
+
+LOCAL_BIND = (sys.argv[1],
               int(sys.argv[2]) if len(sys.argv) > 2 else 8089)
 TARGET = ("127.0.0.1",
           int(sys.argv[3]) if len(sys.argv) > 3 else 8089)

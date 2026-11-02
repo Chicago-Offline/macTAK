@@ -59,3 +59,7 @@
 - **Pathway A fidelity baseline** — **done 2026-11-01**: WinTAK-CIV 5.8.0.149 golden VM (`wintak-baseline`, snapshot `golden-wintak`) built and smoke-tested under VMPal; see `pathway-a.md`. Feeds `ci-qa.md` §5 and the G6 parity rungs.
 - **Pathway A FTS round-trip** — **done 2026-11-02**: FreeTAKServer container (VMPal Containers, Mac-side) linked to WinTAK over CoT TCP 8087 with a third-party-witnessed WinTAK↔FTS round trip; stacked snapshot `golden-wintak-fts`; see `pathway-a.md` §FTS round-trip.
 
+## License
+
+GPL-3.0 — see [`LICENSE`](LICENSE). This repo is published under the GNU GPL v3 to match the obligation inherited from the upstream source (`deptofdefense/AndroidTacticalAssaultKit-CIV`, GPL-3.0); the eventual macOS port will carry the same license with its compliance pipeline (see `ci-qa.md` §4 Tier 3).
+

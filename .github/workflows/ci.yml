@@ -1,0 +1,132 @@
+# Tier 1 per docs/ci-qa.md: native-engine PR gate, JVM kernel tests, shell/workflow lint.
+#
+# `src/` is local-only (gitignored): CI materializes the upstream ATAK CIV tree at
+# the same pinned commit the local build uses. dev/g1/build-native.sh runs
+# verbatim — one canonical build path, no CI-specific forks.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-engine:
+    name: native engine (macOS arm64)
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - name: Check out macTAK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check out upstream ATAK CIV at the pinned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: deptofdefense/AndroidTacticalAssaultKit-CIV
+          ref: 889eee292c43d3d2eafdd1f2fbf378ad5cd89ecc # keep in sync with local src/ (docs/ci-qa.md)
+          path: src
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install engine dependencies (Homebrew)
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: brew install cmake rsync proj geos gdal libspatialite minizip nlohmann-json laszip googletest
+
+      - name: Build engine + canary (dev/g1/build-native.sh, verbatim)
+        run: bash dev/g1/build-native.sh
+
+      - name: Upload engine artifacts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-engine-macos-arm64
+          path: |
+            dev/g1/native-dist/libtakengine.dylib
+            dev/g1/native-dist/libGLESv2-stub.dylib
+            dev/g1/native-dist/takengine-tests.xml
+          if-no-files-found: warn
+
+  jvm-tests:
+    name: JVM tests (Zulu 8, macOS arm64)
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - name: Check out macTAK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check out upstream ATAK CIV at the pinned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: deptofdefense/AndroidTacticalAssaultKit-CIV
+          ref: 889eee292c43d3d2eafdd1f2fbf378ad5cd89ecc
+          path: src
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set up Zulu 8 (arm64)
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: zulu
+          java-version: '8'
+          architecture: aarch64
+          cache: gradle
+
+      - name: Apply G0 public-source build patch
+        run: patch -d src -p1 --forward < dev/spike/g0/patches/gradle-public-source-build.patch
+
+      - name: Kernel tests + publishToMavenLocal
+        working-directory: src/takkernel
+        run: ./gradlew --no-daemon :shared:test :port:test publishToMavenLocal
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: jvm-test-reports
+          path: |
+            src/takkernel/shared/build/reports/tests/
+            src/takkernel/port/build/reports/tests/
+            src/takkernel/shared/build/test-results/test/
+            src/takkernel/port/build/test-results/test/
+          if-no-files-found: warn
+
+  lint:
+    name: lint (shell + workflows)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out macTAK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: actionlint (all workflow files)
+        uses: rhysd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
+
+      - name: shellcheck + bash -n (dev/**/*.sh)
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          scripts=(dev/**/*.sh)
+          if [ "${#scripts[@]}" -eq 0 ]; then
+            echo "error: no scripts matched dev/**/*.sh" >&2
+            exit 1
+          fi
+          shellcheck "${scripts[@]}"
+          for s in "${scripts[@]}"; do bash -n "$s"; done
+          echo "lint OK: ${#scripts[@]} script(s)"

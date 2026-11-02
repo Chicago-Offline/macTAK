@@ -36,7 +36,7 @@ Source of truth: `src/` = `deptofdefense/AndroidTacticalAssaultKit-CIV` @ `889ee
 
 ## 3. takkernel dependency graph (from its README)
 
-```
+```text
 annotation → port → engine → shared → aarbundle / controlled
 ```
 
@@ -87,4 +87,3 @@ Hot app packages (files importing android): `preferences` (45), `gui` (42), `uti
 ## Appendix — inventory method
 
 Commands (run at `889eee2`): per-module LOC via `find … -print0 | xargs -0 cat | wc -l` per extension class; coupling via `grep -rl '^import android\.'` counts; JNI via `grep -rn ' native '`; GL surface via `#include <GLES` / `egl[A-Z]` file counts; platform branches via CMake inspection. A `find` precedence bug in the first pass was caught and corrected (C++ LOC initially under-reported; all figures above are from the corrected pass). Clone kept unmodified for citation.
-

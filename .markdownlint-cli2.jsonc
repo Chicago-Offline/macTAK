@@ -1,0 +1,11 @@
+{
+  // macTAK markdown config (Tier 0, docs/ci-qa.md) — intentional and minimal.
+  // No "globs" here: the workflow passes '**/*.md' explicitly.
+  "config": {
+    "MD013": false, // line length: prose and tables run long by design
+    "MD033": false, // inline HTML: tables use markup/symbols deliberately
+    "MD041": false, // first-line heading: several docs open with a blockquote banner
+    "MD024": { "siblings_only": true }, // repeated section names across sections are fine
+    "MD060": false // table-column style: tables are width-aligned by hand on purpose
+  }
+}

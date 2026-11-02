@@ -188,8 +188,8 @@ ctypes.CDLL(sys.argv[1])
 print("[g1] dlopen OK:", sys.argv[1])
 PY
 
-log "canary 2/2: engine C++ tests (Catch2)"
-"$WORK/cmake/takengine-tests"
+log "canary 2/2: engine C++ tests (GTest)"
+"$WORK/cmake/takengine-tests" --gtest_output=xml:"$OUT/takengine-tests.xml"
 
 # --- stage ---------------------------------------------------------------
 log "staging → $OUT"

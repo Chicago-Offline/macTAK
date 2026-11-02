@@ -22,9 +22,11 @@ Pathway A is not a port path — it is the **fidelity oracle** for Pathway C: a 
 1. VMPal New VM → Windows 11 24H2; 9 CPU / 16 GB / 512 GB; GPU acceleration on; auto sign-in (unattended, ~7 min).
 2. Copy the installers into the guest.
 3. Elevated silent install — **the MSI alone suffices** (the bootstrapper EXE is not needed):
-   ```
+
+   ```text
    msiexec /i WinTAK-5.8.0.149-civ-x64.msi /qn /norestart /l*v wintak-install.log
    ```
+
    Verbose log at `C:\Users\<user>\wintak-install.log` ends "Installation completed successfully"; reboot suppressed.
 4. Launch, click through the first-run Device Setup Wizard (3 steps; data-package import and callsign skippable) and the imagery/WMS dialog — defaults accept the NRL + USGS imagery sources.
 5. Snapshot. The golden was taken **with WinTAK running**, so a resumed clone lands directly on the main map; take it from VMPal's VM menu.
@@ -42,13 +44,15 @@ Measured on the built image, 2026-11-01:
 
 1. **Direct3D 12 kills WinTAK in this VM.** With D3D12 on, ANGLE/EGL selects it and WinTAK exits silently mid-startup ("Initializing action bar"; no exception, no WER event, no dump). Fix, and invariant: VM setting Direct3D 12 **off** (takes effect at the next full shutdown + start). If WinTAK dies silently after a settings change, check this first.
 2. **Never launch WinTAK from an agent exec job.** VMPal `exec` (any job-object-parented shell) kills its process tree when the job closes — WinTAK launched via `Start-Process` died at ~25–60 s, looking exactly like a crash. Launch long-lived GUI apps so they parent outside the job, e.g. WMI:
+
    ```powershell
    Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '"C:\Program Files\WinTAK\WinTAK.exe"' }
    ```
+
 3. Guest tooling quirks: prefer PowerShell over `cmd` (quoting of spaced paths unreliable); a bare `cmd.exe` as the exec command errors — give the full path and `/c`; `--admin` execs with cmd need `/c` or an interactive shell opens.
 4. **WinTAK's UI thread hangs after long automated sessions.** Mid-session the app stops accepting input (all clicks/keys ignored) with occasional "WinTAK encountered an Unhandled Exception" toasts, while the process still reports `Responding=True`. Recovery: kill + WMI relaunch (gotcha #2) — ~20 s to a fresh, auto-connected instance. Budget a restart before any scripted UI pass.
-5. **Blind UI automation of the map is unreliable.** GoTo coordinates, manual location, and wheel zoom each fought scripted interaction at this window scale (guest display 5120×2600 mapped into a 1280×650 coordinate space; UI text ~4 px, hard for OCR too). Deterministic alternatives: connections via `Config.xml` (§FTS round-trip); marker placement via `../reference/tools/inject-marker.py` with receipt verified in FTS's log or a listener, not on screen.
-6. **The `vigsecdrone/freetakserver` image swaps the classic FTS port roles:** plaintext CoT = **8087**, SSL CoT = **8089** — plain TCP into 8089 dies with `SSL: WRONG_VERSION_NUMBER` (exactly what the Connection Manager's 8089 default pairing hits; WinTAK's own TCP default of 8088 is closer but also wrong here). FTS's REST API (19020) did not answer on this build; verify at the CoT layer with `../reference/tools/cot-listen.py`. FTS 2.x also keeps zombie client sockets in its client dict — restart the container between test rounds, and note it only registers a client after that client's first message (a silent socket never counts).
+5. **Blind UI automation of the map is unreliable.** GoTo coordinates, manual location, and wheel zoom each fought scripted interaction at this window scale (guest display 5120×2600 mapped into a 1280×650 coordinate space; UI text ~4 px, hard for OCR too). Deterministic alternatives: connections via `Config.xml` (§FTS round-trip); marker placement via `../dev/reference/tools/inject-marker.py` with receipt verified in FTS's log or a listener, not on screen.
+6. **The `vigsecdrone/freetakserver` image swaps the classic FTS port roles:** plaintext CoT = **8087**, SSL CoT = **8089** — plain TCP into 8089 dies with `SSL: WRONG_VERSION_NUMBER` (exactly what the Connection Manager's 8089 default pairing hits; WinTAK's own TCP default of 8088 is closer but also wrong here). FTS's REST API (19020) did not answer on this build; verify at the CoT layer with `../dev/reference/tools/cot-listen.py`. FTS 2.x also keeps zombie client sockets in its client dict — restart the container between test rounds, and note it only registers a client after that client's first message (a silent socket never counts).
 
 ## CI use (ties to ci-qa.md §5)
 
@@ -67,7 +71,7 @@ Live WinTAK ↔ FreeTAKServer CoT exchange, built on the golden without disturbi
 
 **Stack.** FTS runs **Mac-side**, not in the VM: VMPal Containers (Linux kernel 7.3.0, 4 GB) running the community image `vigsecdrone/freetakserver:latest` (arm64 + amd64; container name `freetakserver`, `network: host`). WinTAK in the bridged VM connects over the LAN like any ordinary client.
 
-**Connectivity.** VMPal publishes container ports on the Mac's **localhost only** — `lsof` shows `127.0.0.1` bindings even with `network: host` — so the bridged VM cannot reach them directly. Bridge: `../reference/tools/cot-proxy.py` listens on the Mac's LAN address and forwards into the localhost forwarder, one instance per port (start with `nohup`; logs to `/tmp/cot-proxy.log`):
+**Connectivity.** VMPal publishes container ports on the Mac's **localhost only** — `lsof` shows `127.0.0.1` bindings even with `network: host` — so the bridged VM cannot reach them directly. Bridge: `../dev/reference/tools/cot-proxy.py` listens on the Mac's LAN address and forwards into the localhost forwarder, one instance per port (start with `nohup`; logs to `/tmp/cot-proxy.log`):
 
 ```sh
 python3 cot-proxy.py <mac-lan-ip> 8087 8087   # CoT TCP for WinTAK
@@ -87,15 +91,15 @@ python3 cot-proxy.py <mac-lan-ip> 8089 8089   # CoT SSL, if ever needed
 
 WinTAK auto-connects at launch (toast: "Connected to tcp://…:8087") and sends presence continuously (callsign from the device setup, type `a-f-G-U-C-I`).
 
-**Verification (protocol-level, third-party witnessed).** Two Mac-side CoT clients, `../reference/tools/cot-listen.py` (passive listener that sends one handshake event so FTS registers it) and `../reference/tools/inject-marker.py` (sends a CoT marker and holds the socket):
+**Verification (protocol-level, third-party witnessed).** Two Mac-side CoT clients, `../dev/reference/tools/cot-listen.py` (passive listener that sends one handshake event so FTS registers it) and `../dev/reference/tools/inject-marker.py` (sends a CoT marker and holds the socket):
 
 - WinTAK's own presence (`callsign=HURRICANE`, `takv version="5.8.0.149" platform="WinTAK-CIV"`) arrived at the listener through FTS — **WinTAK → FTS → other client** ✔
 - A marker injected from the Mac came back to the listener — **FTS → clients** ✔ — and FTS's stdout shows `sent to client S-1-5-21-…` for WinTAK's client — **FTS → WinTAK** ✔
-- Evidence excerpt: `../reference/captures/fts-roundtrip-evidence.txt` (local only, like all WinTAK artifacts).
+- Evidence excerpt: `../dev/reference/captures/fts-roundtrip-evidence.txt` (local only, like all WinTAK artifacts).
 
 **Stacked snapshot:** `golden-wintak-fts` (id `2588E027-5008-4289-8249-385638E9E80F`, taken 2026-11-02 with WinTAK running, session included, FTS connection saved in Config.xml). The FTS container is Mac-side state and is **not** part of the snapshot: revive the stack with `vmpal_run_container` (`vigsecdrone/freetakserver:latest`, `network: host`) + the two proxy instances, then any resumed clone reconnects on its own.
 
-**Reference capture (G6).** `../reference/captures/wintak-ref-1-map.png` — full guest display (5120×2600), main map + ribbon, captured from inside the guest via `../reference/tools/capture.ps1` (PowerShell `CopyFromScreen` → `Z:\Downloads`, which maps to the Mac's Downloads folder). The full parity set (device setup wizard, tool surfaces, map interactions) is still to be captured **from clones** per the policy below; note captures and evidence live in `../reference/captures/`, which is `.gitignore`d (GOTS-derived artifacts never enter the public repo).
+**Reference capture (G6).** `../dev/reference/captures/wintak-ref-1-map.png` — full guest display (5120×2600), main map + ribbon, captured from inside the guest via `../dev/reference/tools/capture.ps1` (PowerShell `CopyFromScreen` → `Z:\Downloads`, which maps to the Mac's Downloads folder). The full parity set (device setup wizard, tool surfaces, map interactions) is still to be captured **from clones** per the policy below; note captures and evidence live in `../dev/reference/captures/`, which is `.gitignore`d (GOTS-derived artifacts never enter the public repo).
 
 ## Open
 

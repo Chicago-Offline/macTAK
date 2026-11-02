@@ -22,7 +22,7 @@ Gate-gated plan. Each gate has: **objective → exit criteria (demo artifact) �
 - Host = JVM (takkernel `java` target; `engine/src/jre` pattern). Comms via commoncommo JNI (or its ObjC bindings from Swift — decide here; JNI keeps one process, ObjC suits a split-process design later).
 - Test: connect to FreeTAKServer (or `takproto`-aware peer), send/recv CoT, persist to the engine's tracks DB; `flighttactics/TAKTracker` as MIT-licensed protocol cross-reference.
 
-*Pre-validated 2026-11-02 (see `pathway-a.md` §FTS round-trip): the same FreeTAKServer container + Mac-side wiring this gate's nightly job will reuse already streams CoT both ways with the reference client as witness (WinTAK presence relayed to an independent listener; injected markers delivered back). Known traps for the integration job: the `vigsecdrone/freetakserver` image swaps port roles (8087 plaintext / 8089 SSL), FTS registers a client only after its first message (send a handshake), and zombie client sockets accumulate — restart the container between runs. The fallback branch also has a second proof beyond TAKTracker: a ~150-line stdlib Python CoT client (`../reference/tools/`) performed the same witnessed round-trip.*
+*Pre-validated 2026-11-02 (see `pathway-a.md` §FTS round-trip): the same FreeTAKServer container + Mac-side wiring this gate's nightly job will reuse already streams CoT both ways with the reference client as witness (WinTAK presence relayed to an independent listener; injected markers delivered back). Known traps for the integration job: the `vigsecdrone/freetakserver` image swaps port roles (8087 plaintext / 8089 SSL), FTS registers a client only after its first message (send a handshake), and zombie client sockets accumulate — restart the container between runs. The fallback branch also has a second proof beyond TAKTracker: a ~150-line stdlib Python CoT client (`../dev/reference/tools/`) performed the same witnessed round-trip.*
 
 **Exit:** CLI demo: `./atak-headless --connect fts.example:8087` streams positions both ways and plots them in-memory. **Fallback (branch):** if commoncommo-on-macOS drags, implement CoT transport directly (Swift `Network.framework` + `takcot` XSD + `takproto` protobufs, TAKTracker as reference) and treat engine-comms as optional — costs engine features (cert store, contact management) but unblocks the critical path.
 
@@ -63,7 +63,7 @@ Rungs, each independently demoable (highest-value first):
 
 Each rung re-estimates against upstream (`889eee2` is the frozen baseline; repo static since Oct 2024 — divergence risk currently low, rising if upstream resumes).
 
-Reference evidence exists (2026-11-02): a full-display capture of the WinTAK golden session plus a repeatable in-guest capture harness (`pathway-a.md` §FTS round-trip; harness in `../reference/tools/`) — G6 parity checklists compare against it. Captures stay local per `ci-qa.md` §3: GOTS-derived artifacts never enter the public repo.
+Reference evidence exists (2026-11-02): a full-display capture of the WinTAK golden session plus a repeatable in-guest capture harness (`pathway-a.md` §FTS round-trip; harness in `../dev/reference/tools/`) — G6 parity checklists compare against it. Captures stay local per `ci-qa.md` §3: GOTS-derived artifacts never enter the public repo.
 
 ## Risk → gate mapping
 
@@ -90,4 +90,3 @@ cd takkernel && ../../gradlew publishToMavenLocal -PkernelBuildTarget=java
 ```
 
 CI & QA infrastructure (what runs, where, and why): see `ci-qa.md` — Tier 1 (`jvm-tests`, `native-engine`, `lint`) lands with this spike; `native-engine` is R1's scored signal. Tier 2's `engine-integration` wiring is pre-validated on the dev Mac (FreeTAKServer container + CoT proxy bridge, `pathway-a.md` §FTS round-trip).
-

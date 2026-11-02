@@ -62,4 +62,3 @@ License: **GPL-3.0** propagates to any port of this tree; plan publication at fi
 ## 7. Bottom line
 
 The clone **upgraded** the feasibility story relative to pre-clone research: the engine's macOS and desktop scaffolding is not folklore — it is in the tree (CMake `elseif(APPLE)`, `macos-64.mk`, jre/JOGL host, commo Xcode project). The risk concentrates exactly where pre-clone research predicted — the 492K-LOC Android app layer — and is bounded by architecture (context-agnostic renderer, platform-neutral engine core, portable Apple-first comms). The open unknowns are all **compile-and-run questions** answerable by the G0 spike, not research questions.
-

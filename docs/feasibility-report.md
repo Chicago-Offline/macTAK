@@ -65,4 +65,3 @@
 ## License
 
 GPL-3.0 — see [`LICENSE`](../LICENSE). This repo is published under the GNU GPL v3 to match the obligation inherited from the upstream source (`deptofdefense/AndroidTacticalAssaultKit-CIV`, GPL-3.0); the eventual macOS port will carry the same license with its compliance pipeline (see `ci-qa.md` §4 Tier 3).
-

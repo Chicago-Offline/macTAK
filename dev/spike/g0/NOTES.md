@@ -8,7 +8,7 @@
 
 Full engine C++ target compiles (~460 TU builds) and links into:
 
-```
+```text
 libtakengine.dylib — 9.6 MB, Mach-O 64-bit arm64 shared library
   links: libspatialite.8, libgdal.39 (3.13), libgeos.3.15, libproj.25 (9.9),
          libminizip.1, libz, libsqlite3 (system), libGLESv2 (throwaway stub)

@@ -9,4 +9,4 @@
 .DS_Store
 
 # WinTAK UI captures + session evidence (GOTS-derived artifacts, local only)
-/reference/captures/
+/dev/reference/captures/

@@ -2,21 +2,22 @@
 #
 # G1.0 — deterministic native build of the takkernel C++ engine (macOS arm64).
 #
-# Reproduces the G0 spike result (spike/g0/NOTES.md) without touching the
+# Reproduces the G0 spike result (dev/spike/g0/NOTES.md) without touching the
 # evidence tree or /tmp:
-#   src/takkernel/engine/src/main  →  g1/build/engine (throwaway copy)
-#   + spike/g0/patches/gdal-drift-*.patch (3-file GDAL API-drift set)
-#   + GLES stub (spike/g0/gles-stub) as the libGLESv2 slot (ANGLE lands at G2)
+#   src/takkernel/engine/src/main  →  dev/g1/build/engine (throwaway copy)
+#   + dev/spike/g0/patches/gdal-drift-*.patch (3-file GDAL API-drift set)
+#   + GLES stub (dev/spike/g0/gles-stub) as the libGLESv2 slot (ANGLE lands at G2)
 #   + nlohmann-json stand-in for tinygltf
-#   → libtakengine.dylib staged in g1/native-dist/
+#   → libtakengine.dylib staged in dev/g1/native-dist/
 #   → canary: dlopen + Catch2 subset of engine/src/test/cpp
 #
 # Everything lands under g1/build (wiped each run) for reproducibility.
 # A clean build is ~4–5 min at -j$(hw.ncpu).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-G1="$ROOT/g1"
+DEV="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # <repo>/dev — this script lives at dev/g1/
+ROOT="$(cd "$DEV/.." && pwd)"                             # <repo>
+G1="$DEV/g1"
 WORK="$G1/build"
 OUT="$G1/native-dist"
 ENGINE_MAIN="$ROOT/src/takkernel/engine/src/main"
@@ -51,14 +52,14 @@ log "copying engine tree → $WORK/engine"
 rsync -a --exclude .git "$ENGINE_MAIN/" "$WORK/engine/"
 
 log "applying GDAL-drift patches (-p3 → cpp/...)"
-for p in "$ROOT"/spike/g0/patches/gdal-drift-*.patch "$ROOT"/g1/patches/*.patch; do
+for p in "$DEV"/spike/g0/patches/gdal-drift-*.patch "$G1"/patches/*.patch; do
   patch --forward --silent -p3 -d "$WORK/engine" < "$p"
   log "  applied $(basename "$p")"
 done
 
 log "building GLES stub (throwaway; ANGLE replaces it at G2)"
 clang -arch arm64 -dynamiclib -O2 \
-  -o "$WORK/gles-stub/libGLESv2.dylib" "$ROOT/spike/g0/gles-stub/stub.c"
+  -o "$WORK/gles-stub/libGLESv2.dylib" "$DEV/spike/g0/gles-stub/stub.c"
 
 log "tinygltf overlay (nlohmann-json stand-in)"
 mkdir -p "$WORK/overlay/tinygltf"

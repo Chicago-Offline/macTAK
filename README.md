@@ -20,7 +20,7 @@ The Team Awareness Kit (TAK) is the geospatial situational-awareness stack used 
 
 ## How the port works
 
-- **The engine already builds natively.** `libtakengine.dylib` (9.6 MB Mach-O arm64, ~460 translation units) compiles and links on macOS, and all five kernel Java modules publish to mavenLocal on Zulu 8 arm64 — proven by the [G0 spike](spike/g0/NOTES.md).
+- **The engine already builds natively.** `libtakengine.dylib` (9.6 MB Mach-O arm64, ~460 translation units) compiles and links on macOS, and all five kernel Java modules publish to mavenLocal on Zulu 8 arm64 — proven by the [G0 spike](dev/spike/g0/NOTES.md).
 - **The renderer is a substitution slot.** takkernel consumes OpenGL ES through an injectable provider, so macOS plugs in **ANGLE-on-Metal** — the same backend Chromium ships — rather than porting GL by hand.
 - **Comms are portable.** commoncommo is a C++ core with JNI and Objective-C bindings, alongside takproto (protobuf) and takcot (CoT schemas).
 - **Verification runs against real TAK.** A WinTAK golden VM ([Pathway A](docs/pathway-a.md)) plus a Mac-side FreeTAKServer provide the interop baseline; a WinTAK↔FTS CoT round-trip has already been witnessed at the protocol layer.
@@ -30,9 +30,8 @@ The Team Awareness Kit (TAK) is the geospatial situational-awareness stack used 
 | Path | Contents |
 |---|---|
 | `docs/` | Program documents: feasibility study, architecture evidence, roadmap, CI/QA plan, Pathway A baseline |
-| `spike/` | Gate-spike records — `spike/g0/` holds the G0 build recipe, wrapper, and patch catalog |
+| `dev/` | Development workspace: `dev/g1/` native engine build harness (recipe + patch set), `dev/spike/` gate-spike records (`dev/spike/g0/` = G0 build recipe, wrapper, patch catalog), `dev/reference/` test rig — CoT client tools (committed); WinTAK-derived captures (`.gitignore`d — GOTS artifacts never enter this repo) |
 | `src/` | Read-only pinned clone of upstream ATAK-CIV @ `889eee2` (v4.6.0.5) — evidence tree; changes to it are exported as patch files, never committed in place |
-| `reference/` | Test rig: CoT client tools (committed); WinTAK-derived captures (`.gitignore`d — GOTS artifacts never enter this repo) |
 
 ## Project documents
 

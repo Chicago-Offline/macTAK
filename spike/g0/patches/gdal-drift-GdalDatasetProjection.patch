@@ -1,0 +1,31 @@
+diff --git a/src/takkernel/engine/src/main/cpp/raster/gdal/GdalDatasetProjection.cpp b/tmp/takeng-src/cpp/raster/gdal/GdalDatasetProjection.cpp
+index 70a2480..15992c8 100644
+--- a/src/takkernel/engine/src/main/cpp/raster/gdal/GdalDatasetProjection.cpp
++++ b/tmp/takeng-src/cpp/raster/gdal/GdalDatasetProjection.cpp
+@@ -415,7 +415,7 @@ namespace atakmap {
+                 GDALDriver *driver = dataset->GetDriver();
+                 if (strcmp(driver->GetDescription(), "NITF") != 0)
+                     return false;
+-                char **TREs = dataset->GetMetadata("TRE");
++                char **TREs = const_cast<char **>(dataset->GetMetadata("TRE"));
+                 bool hasCSCRNA = false;
+                 if (TREs != nullptr) {
+                     // GDAL will automatically utilize high precision coordinates in the
+@@ -438,7 +438,7 @@ namespace atakmap {
+ 
+                 bool hasRPC = false;
+                 if (ret && !hasCSCRNA) {
+-                    char **RPCList = dataset->GetMetadata("RPC");
++                    char **RPCList = const_cast<char **>(dataset->GetMetadata("RPC"));
+                     if (RPCList) {
+                         hasRPC = CSLCount(RPCList) > 0;
+                         CSLDestroy(RPCList);
+@@ -504,7 +504,7 @@ namespace atakmap {
+                     }
+ 
+                     if (!gcp) {
+-                        char **rpcsl = dataset->GetMetadata("RPC");
++                        char **rpcsl = const_cast<char **>(dataset->GetMetadata("RPC"));
+                         if (rpcsl != nullptr) {
+                             int c = CSLCount(rpcsl);
+                             CSLDestroy(rpcsl);

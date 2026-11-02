@@ -1,0 +1,13 @@
+diff --git a/src/takkernel/engine/src/main/cpp/formats/gdal/GdalDatasetProjection2.cpp b/tmp/takeng-src/cpp/formats/gdal/GdalDatasetProjection2.cpp
+index 8507251..86db694 100644
+--- a/src/takkernel/engine/src/main/cpp/formats/gdal/GdalDatasetProjection2.cpp
++++ b/tmp/takeng-src/cpp/formats/gdal/GdalDatasetProjection2.cpp
+@@ -32,7 +32,7 @@ namespace
+ TAKErr TAK::Engine::Formats::GDAL::GdalDatasetProjection2_create(DatasetProjection2Ptr &value, const char *path) NOTHROWS
+ {
+     TAKErr code(TE_Ok);
+-    GDALDatasetHPtr dataset(GDALOpen(path, GA_ReadOnly), GDALClose);
++    GDALDatasetHPtr dataset(GDALOpen(path, GA_ReadOnly), reinterpret_cast<void (*)(void *)>(GDALClose));
+     if (!dataset.get())
+         return TE_InvalidArg;
+     try {

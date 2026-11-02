@@ -4,6 +4,8 @@ Gate-gated plan. Each gate has: **objective → exit criteria (demo artifact) �
 
 ## G0 — Engine builds on macOS arm64 (the 2-week spike)
 
+> **Status: core spike DONE 2026-11-02** — ~460 TUs compile and link into `libtakengine.dylib` (9.6 MB, Mach-O arm64) via the spike wrapper + 3-file GDAL-drift patch set; see `spike/g0/NOTES.md`. Step 4 (Java `publishToMavenLocal`) pending; dylib smoke-load is G1's entry test.
+
 **Objective:** Compile `takkernel/engine` C++ on macOS 26/27 arm64 using the in-tree `elseif(APPLE)` branch.
 
 1. Tooling: Xcode current; CMake ≥ 3.25; Conan 1.59 (as pinned) *or* map deps to Homebrew/vcpkg.

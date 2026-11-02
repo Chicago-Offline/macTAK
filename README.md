@@ -50,6 +50,7 @@
 | `roadmap.md` | Gate-gated plan G0–G6 with exit criteria, spike checklist, fallback decision points |
 | `ci-qa.md` | CI/QA infrastructure plan: inherited test corpus, CI tiers, runner strategy, golden-fixture/render/perf harness |
 | `pathway-a.md` | Pathway A baseline: the WinTAK-in-VM golden image — build record, smoke test, gotchas, CI use, verified FreeTAKServer CoT round-trip |
+| `spike/g0/NOTES.md` | G0 spike record (done 2026-11-02): engine C++ builds + links as arm64 dylib — wrapper, patch catalog, GLES-stub approach |
 
 `src/` contains the cloned evidence tree (do not modify; pin all citations to `889eee2`).
 

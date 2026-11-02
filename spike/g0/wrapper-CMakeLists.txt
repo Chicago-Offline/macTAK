@@ -1,0 +1,72 @@
+# G0 spike wrapper (macTAK): the upstream engine CMakeLists has no
+# cmake_minimum_required(), which CMake >= 4.0 treats as a hard error.
+# This wrapper supplies it and pulls the evidence tree in as a
+# subdirectory, keeping src/ pristine.
+cmake_minimum_required(VERSION 3.5)
+cmake_policy(SET CMP0079 NEW)
+project(takengine LANGUAGES C CXX)
+
+set(SRC /Users/meskes/.cline/data/workspaces/chat/macTAK)
+
+add_subdirectory(
+    /tmp/takeng-src/cpp
+    engine-cpp)
+
+# G0 spike: SQLITE_HAS_CODEC needs an SQLCipher-flavoured sqlite3 which the
+# Homebrew deps don't provide. Upstream's own #else branch handles the
+# absence (warning + ignore passphrase), so drop the define for now;
+# swap in brew sqlcipher at the encryption rung if needed.
+get_target_property(_takdefs takengine COMPILE_DEFINITIONS)
+list(REMOVE_ITEM _takdefs SQLITE_HAS_CODEC)
+set_target_properties(takengine PROPERTIES COMPILE_DEFINITIONS "${_takdefs}")
+
+# G0 spike: the upstream macOS branch consumes a "ttp-dist" bundle
+# (takthirdparty) that we replace with Homebrew formulae (R3 mitigation).
+# Inject the keg paths after add_subdirectory, when the target exists.
+if(TARGET takengine)
+    target_include_directories(takengine PRIVATE
+        /opt/homebrew/include
+        ${SRC}/src/khronos/OpenGL/api   # GLES3/gl3.h + GLES2 (GLES-stub slot)
+        ${SRC}/src/khronos/EGL/api      # EGL + KHR/khrplatform.h
+        ${SRC}/src/stl-soft/include     # platformstl/* (used by util/IO*.cpp)
+        /tmp/takeng-overlay             # tinygltf/json.hpp stand-in (nlohmann)
+    )
+    target_link_directories(takengine PRIVATE /opt/homebrew/lib)
+
+    # libkml's renamed minizip -> Homebrew minizip (same signatures)
+    target_compile_definitions(takengine PRIVATE
+        libkml_unzClose=unzClose
+        libkml_unzOpen=unzOpen
+        libkml_unzOpenCurrentFile=unzOpenCurrentFile
+        libkml_unzReadCurrentFile=unzReadCurrentFile
+        libkml_unzGetGlobalInfo=unzGetGlobalInfo
+        libkml_unzGetGlobalComment=unzGetGlobalComment
+        libkml_unzGoToFirstFile=unzGoToFirstFile
+        libkml_unzGoToNextFile=unzGoToNextFile
+        libkml_unzLocateFile=unzLocateFile
+        libkml_unzGetCurrentFileInfo=unzGetCurrentFileInfo
+    )
+    target_link_libraries(takengine PRIVATE minizip)
+
+    # G0: exclude the libLAS-based LAS sources (libLAS is dead upstream;
+    # replacement strategy tracked in the port catalog)
+    get_target_property(_srcs takengine SOURCES)
+    set(_kept)
+    foreach(_s IN LISTS _srcs)
+        if(NOT _s MATCHES "LASScene|las/LAS\\.cpp")
+            list(APPEND _kept ${_s})
+        endif()
+    endforeach()
+    set_target_properties(takengine PROPERTIES SOURCES "${_kept}")
+
+    # G0: the macOS branch links ttp-dist libs that don't exist here.
+    # - drop las/las_c (sources excluded above) and charset (libiconv
+    #   internal, not a brew artifact)
+    # - GLESv2: point at the throwaway GLES-stub (real backend = ANGLE
+    #   on Metal at G2)
+    get_target_property(_libs takengine LINK_LIBRARIES)
+    list(REMOVE_ITEM _libs las las_c charset GLESv2)
+    list(APPEND _libs /tmp/gles-stub/libGLESv2.dylib)
+    list(APPEND _libs sqlite3)
+    set_target_properties(takengine PROPERTIES LINK_LIBRARIES "${_libs}")
+endif()

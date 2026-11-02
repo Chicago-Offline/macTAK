@@ -1,0 +1,5 @@
+# G1 native build: throwaway work tree + staged artifacts (regenerable via
+# ./build-native.sh — never commit either)
+build/
+native-dist/
+build.log

@@ -99,6 +99,9 @@ jobs:
       - name: Apply G0 public-source build patch
         run: patch -d src -p1 --forward < dev/spike/g0/patches/gradle-public-source-build.patch
 
+      - name: Apply G0 shared-test patch (commons-math3 + runtime-stub test exclusion)
+        run: patch -d src -p1 --forward < dev/spike/g0/patches/gradle-shared-test-deps.patch
+
       - name: Kernel tests + publishToMavenLocal
         working-directory: src/takkernel
         run: ./gradlew --no-daemon :shared:test :port:test publishToMavenLocal

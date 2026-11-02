@@ -1,0 +1,26 @@
+--- a/takkernel/shared/build.gradle
++++ b/takkernel/shared/build.gradle
+@@ -4,6 +4,9 @@
+     api project(':port')
+ 
+     testImplementation "org.assertj:assertj-core:$assertjVersion"
++    // macTAK G0: ConfigMapMenuWidgetControllerTest uses commons-math3, which is
++    // not in the android-port transplant jar — regular Central artifact.
++    testImplementation "org.apache.commons:commons-math3:3.6.1"
+ 
+     project.plugins.withId('java-library') {
+         // This dependency is found on compile classpath of this component and consumers.
+@@ -18,4 +21,13 @@
+     }
+ }
+ 
++// macTAK G0: this test drives android-app runtime paths (MapDataRef →
++// FileSystemUtils.<clinit> → android.os.Environment) that the compile-only
++// android-port transplant cannot serve — its android.jar members are API-33
++// signatures that throw "Stub!" at runtime (dev/spike/g0/NOTES.md §3:
++// "compile-time only — not for runtime use"). Needs the gated android-port.
++test {
++    exclude '**/ConfigMapMenuWidgetControllerTest*'
++}
++
+ // default source sets

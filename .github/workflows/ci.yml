@@ -111,11 +111,12 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: jvm-test-reports
+          # G0 patch relocates Gradle build dirs under build/java/
           path: |
-            src/takkernel/shared/build/reports/tests/
-            src/takkernel/port/build/reports/tests/
-            src/takkernel/shared/build/test-results/test/
-            src/takkernel/port/build/test-results/test/
+            src/takkernel/shared/build/java/reports/tests/
+            src/takkernel/port/build/java/reports/tests/
+            src/takkernel/shared/build/java/test-results/test/
+            src/takkernel/port/build/java/test-results/test/
           if-no-files-found: warn
 
   lint:

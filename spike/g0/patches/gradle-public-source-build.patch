@@ -1,0 +1,151 @@
+diff --git a/takkernel/build.gradle b/takkernel/build.gradle
+index 860866d..a670ddd 100644
+--- a/takkernel/build.gradle
++++ b/takkernel/build.gradle
+@@ -11,7 +11,11 @@ buildscript { scriptHandler ->
+         // `gradle-cmake-plugin` is not required for Android builds and is observed to cause Gradle
+         // sync issues in Android Studio when using the ATAK monorepo configuration; command-line
+         // builds and standalone `takkernel` development in Android Studio are not effected.
+-        if(project.findProperty('kernelBuildTarget') != 'android') {
++        // macTAK G0 spike: `gov.tak.gradle.cmake:gradle-cmake-plugin` is only distributed on the
++        // credential-gated TAK artifactory (no public takRepo host resolves). -PuseTakRepo=true
++        // restores upstream; without it the Java build skips the native hook entirely (the engine
++        // dylib is built separately by spike/g0's wrapper).
++        if(project.hasProperty('useTakRepo') && project.findProperty('kernelBuildTarget') != 'android') {
+             classpath "gov.tak.gradle.cmake:gradle-cmake-plugin:$gradleCmakePluginVersion"
+         }
+         classpath "org.owasp:dependency-check-gradle:${owaspDependencyCheckVersion}"
+diff --git a/takkernel/engine/build.gradle b/takkernel/engine/build.gradle
+index 3e16c06..15b4b1c 100644
+--- a/takkernel/engine/build.gradle
++++ b/takkernel/engine/build.gradle
+@@ -6,18 +6,25 @@ javah {
+     outputDir file('src/main/jni/')
+ }
+ 
+-externalNativeBuild {
+-    path 'CMakeLists.txt'
+-    arguments  "-DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/android.toolchain.cmake",
+-        "-DANDROID_TOOLCHAIN=gcc",
+-        "-DANDROID_STL=gnustl_static",
+-        "-DANDROID_PLATFORM=android-24", // 24 is the highest so available in 12 ndk??
+-        "-DANDROID_ARM_NEON=ON"
+-    cFlags "-D__GXX_EXPERIMENTAL_CXX0X__"
+-    cppFlags "-fexceptions", "-frtti"
+-    buildTarget 'install'
+-    if(isJavaKernelBuild) {
+-        installPrefix "${buildDir}/jniLibs/${runtimePlatform}"
++// macTAK G0 spike: `useTakRepo` restores the upstream takRepo-gated native build
++// (gradle-cmake-plugin + gov.tak.* runtime artifacts). Default off: compile Java-only
++// against public artifacts; the engine dylib is built by spike/g0's wrapper instead.
++def useTakRepo = project.findProperty('useTakRepo') == 'true'
++
++if(useTakRepo) {
++    externalNativeBuild {
++        path 'CMakeLists.txt'
++        arguments  "-DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/android.toolchain.cmake",
++            "-DANDROID_TOOLCHAIN=gcc",
++            "-DANDROID_STL=gnustl_static",
++            "-DANDROID_PLATFORM=android-24", // 24 is the highest so available in 12 ndk??
++            "-DANDROID_ARM_NEON=ON"
++        cFlags "-D__GXX_EXPERIMENTAL_CXX0X__"
++        cppFlags "-fexceptions", "-frtti"
++        buildTarget 'install'
++        if(isJavaKernelBuild) {
++            installPrefix "${buildDir}/jniLibs/${runtimePlatform}"
++        }
+     }
+ }
+ 
+@@ -50,13 +57,19 @@ dependencies {
+         // Use JUnit test framework
+         testImplementation("junit:junit:${junitVersion}")
+ 
++        // macTAK G0 spike: android-port resolved from the mavenLocal transplant (spike/g0/NOTES.md)
+         api("gov.tak.support:android-port:${androidPortVersion}")
+-        api("gov.tak.support:gles-jogl-c:${glesJoglCVersion}")
+-        api("gov.tak.thirdparty:takthirdparty-rt-${runtimePlatform}:${takthirdpartyVersion}")
+-        api("gov.tak.thirdparty:gdal:${takthirdpartyVersion}:tak")
+-        api("gov.tak.thirdparty:gdaldata:${takthirdpartyVersion}")
+-        api("gov.tak.thirdparty:jassimp:${takthirdpartyVersion}:tak")
+-        api("gov.tak.thirdparty:libLAS-${runtimePlatform}:${libLasVersion}")
++
++        // macTAK G0 spike: remaining native/comms artifacts from the TAK artifactory
++        // (no compile-time imports in engine java). -PuseTakRepo=true restores upstream.
++        if(useTakRepo) {
++            api("gov.tak.support:gles-jogl-c:${glesJoglCVersion}")
++            api("gov.tak.thirdparty:takthirdparty-rt-${runtimePlatform}:${takthirdpartyVersion}")
++            api("gov.tak.thirdparty:gdal:${takthirdpartyVersion}:tak")
++            api("gov.tak.thirdparty:gdaldata:${takthirdpartyVersion}")
++            api("gov.tak.thirdparty:jassimp:${takthirdpartyVersion}:tak")
++            api("gov.tak.thirdparty:libLAS-${runtimePlatform}:${libLasVersion}")
++        }
+     } else if(isAndroidKernelBuild) {
+         api("gov.tak.thirdparty:takthirdparty:${takthirdpartyVersion}@aar")
+         api("gov.tak.thirdparty:libLAS:${libLasVersion}@aar")
+@@ -125,15 +138,21 @@ task cleanCMakeExports(type: Delete) {
+ clean.dependsOn cleanCMakeExports
+ 
+ afterEvaluate {
+-    tasks.getByName('preExternalNativeBuild').dependsOn('generateJniHeaders')
++    // macTAK G0 spike: JNI-header + native-jar wiring only with the takRepo toolchain
++    if(useTakRepo) tasks.getByName('preExternalNativeBuild').dependsOn('generateJniHeaders')
+ 
+     if (isJavaKernelBuild) {
+         // Java specific
+         def runtimeJarTask = tasks.getByName("${runtimePlatform}Jar")
+-        runtimeJarTask.dependsOn('postExternalNativeBuild')
+-        jar.dependsOn(runtimeJarTask)
++        if(useTakRepo) {
++            runtimeJarTask.dependsOn('postExternalNativeBuild')
++            jar.dependsOn(runtimeJarTask)
++        }
+ 
+-        publishing {
++        // macTAK G0 spike: skip the rt-<platform>/mainJar publications (they package the
++        // takRepo-gated native runtime jars); the generic components.java publication from
++        // gradle/publishing.gradle still applies.
++        if(useTakRepo) publishing {
+             publications {
+                 // jar publication defined in `publishing.gradle`
+                 jar.pom.withXml {
+diff --git a/takkernel/port/build.gradle b/takkernel/port/build.gradle
+index bda8774..80337cf 100644
+--- a/takkernel/port/build.gradle
++++ b/takkernel/port/build.gradle
+@@ -11,6 +11,6 @@ dependencies {
+ 
+         api "org.jogamp.gluegen:gluegen-rt-main:${joglVersion}"
+         api "org.jogamp.jogl:jogl-all-main:${joglVersion}"
+-        api("gov.tak.support:android-port:${androidPortVersion}")
++        api("gov.tak.support:android-port:${androidPortVersion}") // macTAK G0 spike: mavenLocal transplant (spike/g0/NOTES.md)
+     }
+ }
+diff --git a/takkernel/settings.gradle b/takkernel/settings.gradle
+index 23c1e7c..48fac3f 100644
+--- a/takkernel/settings.gradle
++++ b/takkernel/settings.gradle
+@@ -32,7 +32,9 @@ if(new File(settingsDir, 'controlled').exists()) {
+     include(':controlled')
+     project(':controlled').projectDir = new File(settingsDir, 'controlled')
+ }
+-if(new File(settingsDir, 'controlledaarbundle')) {
++// macTAK G0 spike: guard needs .exists() — a File object alone is always truthy in Groovy,
++// so upstream (which ships the controlled dirs) never noticed on public-source builds.
++if(new File(settingsDir, 'controlledaarbundle').exists()) {
+     include(':controlledaar')
+     project(':controlledaar').projectDir = new File(settingsDir, 'controlledaarbundle')
+ }
+diff --git a/takkernel/shared/build.gradle b/takkernel/shared/build.gradle
+index 43e367b..caa7d76 100644
+--- a/takkernel/shared/build.gradle
++++ b/takkernel/shared/build.gradle
+@@ -11,7 +11,7 @@ dependencies {
+ 
+         api "org.jogamp.gluegen:gluegen-rt-main:${joglVersion}"
+         api "org.jogamp.jogl:jogl-all-main:${joglVersion}"
+-        api("gov.tak.support:android-port:${androidPortVersion}")
++        api("gov.tak.support:android-port:${androidPortVersion}") // macTAK G0 spike: mavenLocal transplant (spike/g0/NOTES.md)
+ 
+         implementation "org.hibernate:hibernate-core:${hibernateCoreVersion}"
+         implementation "org.apache.avro:avro:${avroVersion}"

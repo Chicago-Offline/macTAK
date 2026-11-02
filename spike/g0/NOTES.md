@@ -69,9 +69,34 @@ Generated no-op definitions for the ~121 GLES functions the engine references (`
 
 Every class matches a risk the docs predicted (R2 toolchain drift, R3 dependency substitution). **No new class of unknown surfaced.**
 
-## Not done here / next
+## G0 step 4 (Java publish) — DONE 2026-11-02
 
-- **G0 step 4 (Java):** `gradlew publishToMavenLocal -PkernelBuildTarget=java` — wrapper is Gradle 6.9.1 (needs a JDK ≤ 16; upstream CI used 8; `openjdk@8` install pending).
-- **Smoke load:** `dlopen`/JVM-load of the dylib is G1's entry test (real GL only needed when the renderer starts).
-- **ANGLE** replaces the stub at G2.
+`./gradlew publishToMavenLocal` on Zulu 8 (`1.8.0_512`, arm64-native) with Gradle 6.9.1 (wrapper runs Apple-Silicon-native; `kernelBuildTarget` defaults to `java`, no flags). **BUILD SUCCESSFUL — all five modules published** to `~/.m2/repository/gov/tak/kernel/`: `takkernel-{annotation,port,shared,engine,all}-0.59.1` (jar + sources + pom; engine 3.7 MB / 1,847 classes incl. vendored commons-lang; `all` is a 0-class aggregate as designed).
+
+### What had to change (all in-repo, minimal, flag-gated)
+
+1. **`gov.tak.gradle.cmake:gradle-cmake-plugin` (root `build.gradle` buildscript classpath):** TAK-artifactory-only — no public repo resolves it (Maven Central: no `gov.tak`; `repo.tak.gov`/`artifactory.tak.gov`: NXDOMAIN). Now gated behind `-PuseTakRepo=true` (upstream-restorable); without it the desktop build skips the native hook — the dylib comes from this spike's wrapper instead.
+2. **`settings.gradle` upstream bug:** `if(new File(settingsDir,'controlledaarbundle'))` — a `File` is always truthy in Groovy, so public-source builds died evaluating the nonexistent `:controlledaar` project. Added `.exists()` (the sibling `controlled` guard already had it; upstream ships those dirs so never noticed).
+3. **`gov.tak.support:android-port:3.1.0` — compile-time, not runtime-only as first guessed** (port `FontMetrics` uses `android.graphics.Paint/Typeface`; port `JOGLGLES` delegates to `android.opengl.JOGLGLES`; engine instantiates `android.content.Context`). Unobtainable publicly: not on Central, not in the ATAK-CIV 5.5.1.8 SDK zip (plugin-dev only — its `atak.apk` carries 6.x-era classes whose `android.maps.*` namespace no longer matches 0.59.1). **Transplant installed to mavenLocal** (`gov/tak/support/android-port/3.1.0/`; mavenLocal is first in repo order):
+   - `android.jar` from the public Google platform-33 zip — framework signatures (Paint/Typeface/Bitmap/Uri/GLES/sqlite; all Java-8 bytecode);
+   - TAK classes from the public ATAK-CIV 5.5.1.8 `atak.apk` via dex2jar v2.4 (com.atakmap.* etc., 18.6k classes);
+   - hand-written concrete compile stubs where the kernel outgrew the framework: `android.opengl.JOGLGLES` (init only), `android.content.{Context,ContentResolver}`, `android.content.pm.{PackageManager,ApplicationInfo}`, `android.content.res.{Resources,AssetManager}`, `android.util.DisplayMetrics`. Compile-time only — bodies return null; **not for runtime use**; real desktop runtime needs TAK's android-port from the gated artifactory.
+   - POM declares `slf4j-api:1.7.30` so port's `GLES30` resolves LoggerFactory (upstream got it transitively).
+   The `com.atakmap.android.maps.*` classes shared/engine import are **in-tree** (engine/src/main/java) — no android.maps stubs needed.
+4. **Engine's takRepo-only deps** (gles-jogl-c, takthirdparty-rt, gdal, gdaldata, jassimp, libLAS): still behind `-PuseTakRepo=true` — runtime natives, zero compile-time imports in kernel java.
+
+### Verification
+
+- `~/.m2/repository/gov/tak/kernel/takkernel-{annotation,port,shared,engine,all}/0.59.1/` — jars + `-sources` + poms ✓
+- **G1 entry test already passes:** `ctypes.CDLL('/tmp/takeng/engine-cpp/libtakengine.dylib')` → **dlopen OK, headless** (9.6 MB Mach-O arm64; dyld resolves everything — GLES stub + system libs suffice; no GL context needed at load). The dylib lives in the volatile `/tmp/takeng` cmake dir — rebuild via `wrapper-CMakeLists.txt` (recipe above) when it evaporates.
+
+### Ops lessons (runbook)
+
+- Backgrounding gradle under this agent's shell gets the client process SIGTSTP'd when a command batch ends — launch via a `start_new_session=True` double-detach (python Popen), never plain `nohup … &`.
+- Gradle serves mavenLocal in place (no modules-2 copy): after overwriting an installed artifact, run once with `--refresh-dependencies` (or bump the version).
+- jogamp's `-main` jars are thin manifests; compile against `jogl-all` / `gluegen-rt`.
+
+### Still open
+
+- **ANGLE** replaces the GLES stub at G2.
 - MrSID/proprietary raster distfiles: never reached — no such failure appeared.

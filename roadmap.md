@@ -4,7 +4,7 @@ Gate-gated plan. Each gate has: **objective → exit criteria (demo artifact) �
 
 ## G0 — Engine builds on macOS arm64 (the 2-week spike)
 
-> **Status: core spike DONE 2026-11-02** — ~460 TUs compile and link into `libtakengine.dylib` (9.6 MB, Mach-O arm64) via the spike wrapper + 3-file GDAL-drift patch set; see `spike/g0/NOTES.md`. Step 4 (Java `publishToMavenLocal`) pending; dylib smoke-load is G1's entry test.
+> **Status: G0 CLOSED 2026-11-02** — ~460 TUs compile and link into `libtakengine.dylib` (9.6 MB, Mach-O arm64) via the spike wrapper + 3-file GDAL-drift patch set, **and** `publishToMavenLocal` lands all five kernel Java modules (annotation/port/shared/engine/all 0.59.1) in mavenLocal on Zulu 8 arm64 (public-artifact android-port transplant; `-PuseTakRepo` restores upstream). Headless `dlopen` smoke passes. See `spike/g0/NOTES.md`.
 
 **Objective:** Compile `takkernel/engine` C++ on macOS 26/27 arm64 using the in-tree `elseif(APPLE)` branch.
 

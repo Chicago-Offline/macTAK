@@ -1,10 +1,10 @@
 # Roadmap: ATAK-CIV → Native macOS (Pathway C)
 
-Gate-gated plan. Each gate has: **objective → exit criteria (demo artifact) → fallback if it fails**. A failing gate is a decision point, not a dead end; the two branch points (G1, G2) have pre-analyzed alternates. Estimates assume the team shape in `README.md`.
+Gate-gated plan. Each gate has: **objective → exit criteria (demo artifact) → fallback if it fails**. A failing gate is a decision point, not a dead end; the two branch points (G1, G2) have pre-analyzed alternates. Estimates assume the team shape in `../README.md`.
 
 ## G0 — Engine builds on macOS arm64 (the 2-week spike)
 
-> **Status: G0 CLOSED 2026-11-02** — ~460 TUs compile and link into `libtakengine.dylib` (9.6 MB, Mach-O arm64) via the spike wrapper + 3-file GDAL-drift patch set, **and** `publishToMavenLocal` lands all five kernel Java modules (annotation/port/shared/engine/all 0.59.1) in mavenLocal on Zulu 8 arm64 (public-artifact android-port transplant; `-PuseTakRepo` restores upstream). Headless `dlopen` smoke passes. See `spike/g0/NOTES.md`.
+> **Status: G0 CLOSED 2026-11-02** — ~460 TUs compile and link into `libtakengine.dylib` (9.6 MB, Mach-O arm64) via the spike wrapper + 3-file GDAL-drift patch set, **and** `publishToMavenLocal` lands all five kernel Java modules (annotation/port/shared/engine/all 0.59.1) in mavenLocal on Zulu 8 arm64 (public-artifact android-port transplant; `-PuseTakRepo` restores upstream). Headless `dlopen` smoke passes. See `../spike/g0/NOTES.md`.
 
 **Objective:** Compile `takkernel/engine` C++ on macOS 26/27 arm64 using the in-tree `elseif(APPLE)` branch.
 
@@ -22,7 +22,7 @@ Gate-gated plan. Each gate has: **objective → exit criteria (demo artifact) �
 - Host = JVM (takkernel `java` target; `engine/src/jre` pattern). Comms via commoncommo JNI (or its ObjC bindings from Swift — decide here; JNI keeps one process, ObjC suits a split-process design later).
 - Test: connect to FreeTAKServer (or `takproto`-aware peer), send/recv CoT, persist to the engine's tracks DB; `flighttactics/TAKTracker` as MIT-licensed protocol cross-reference.
 
-*Pre-validated 2026-11-02 (see `pathway-a.md` §FTS round-trip): the same FreeTAKServer container + Mac-side wiring this gate's nightly job will reuse already streams CoT both ways with the reference client as witness (WinTAK presence relayed to an independent listener; injected markers delivered back). Known traps for the integration job: the `vigsecdrone/freetakserver` image swaps port roles (8087 plaintext / 8089 SSL), FTS registers a client only after its first message (send a handshake), and zombie client sockets accumulate — restart the container between runs. The fallback branch also has a second proof beyond TAKTracker: a ~150-line stdlib Python CoT client (`reference/tools/`) performed the same witnessed round-trip.*
+*Pre-validated 2026-11-02 (see `pathway-a.md` §FTS round-trip): the same FreeTAKServer container + Mac-side wiring this gate's nightly job will reuse already streams CoT both ways with the reference client as witness (WinTAK presence relayed to an independent listener; injected markers delivered back). Known traps for the integration job: the `vigsecdrone/freetakserver` image swaps port roles (8087 plaintext / 8089 SSL), FTS registers a client only after its first message (send a handshake), and zombie client sockets accumulate — restart the container between runs. The fallback branch also has a second proof beyond TAKTracker: a ~150-line stdlib Python CoT client (`../reference/tools/`) performed the same witnessed round-trip.*
 
 **Exit:** CLI demo: `./atak-headless --connect fts.example:8087` streams positions both ways and plots them in-memory. **Fallback (branch):** if commoncommo-on-macOS drags, implement CoT transport directly (Swift `Network.framework` + `takcot` XSD + `takproto` protobufs, TAKTracker as reference) and treat engine-comms as optional — costs engine features (cert store, contact management) but unblocks the critical path.
 
@@ -63,7 +63,7 @@ Rungs, each independently demoable (highest-value first):
 
 Each rung re-estimates against upstream (`889eee2` is the frozen baseline; repo static since Oct 2024 — divergence risk currently low, rising if upstream resumes).
 
-Reference evidence exists (2026-11-02): a full-display capture of the WinTAK golden session plus a repeatable in-guest capture harness (`pathway-a.md` §FTS round-trip; harness in `reference/tools/`) — G6 parity checklists compare against it. Captures stay local per `ci-qa.md` §3: GOTS-derived artifacts never enter the public repo.
+Reference evidence exists (2026-11-02): a full-display capture of the WinTAK golden session plus a repeatable in-guest capture harness (`pathway-a.md` §FTS round-trip; harness in `../reference/tools/`) — G6 parity checklists compare against it. Captures stay local per `ci-qa.md` §3: GOTS-derived artifacts never enter the public repo.
 
 ## Risk → gate mapping
 

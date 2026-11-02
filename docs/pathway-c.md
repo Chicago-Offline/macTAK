@@ -1,6 +1,6 @@
 # Pathway C Deep Dive: Native macOS Port of ATAK-CIV
 
-Companion to `../README.md` (verdict/effort) and `roadmap.md` (plan). Everything factual is pinned to clone `src/` @ `889eee2` (v4.6.0.5) or to the prior ecosystem research summarized in §Prior art.
+Companion to `feasibility-report.md` (verdict/effort) and `roadmap.md` (plan). Everything factual is pinned to clone `src/` @ `889eee2` (v4.6.0.5) or to the prior ecosystem research summarized in §Prior art.
 
 ## 1. What "native macOS port" decomposes into
 

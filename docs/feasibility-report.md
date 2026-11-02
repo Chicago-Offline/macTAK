@@ -1,8 +1,10 @@
 # ATAK-CIV → macOS Native Port: Feasibility Report (Pathway C)
 
+> Founding feasibility study of the macTAK program (2026-11). For current program status, see the [repo README](../README.md).
+
 **Verdict: FEASIBLE — with materially better engineering evidence than typical Android ports — but the effort lives almost entirely in the 492k-LOC Android app layer, not the engine.** A credible core TAK client on native macOS is a **12–18 month** effort for a 4–6 person team; full ATAK-CIV parity is a **multi-year** program. No prior macOS-native TAK client exists (verified — this would be the first), so there is no prior art to discount these estimates or solve the hard parts.
 
-- Evidence base: full source clone of `deptofdefense/AndroidTacticalAssaultKit-CIV` @ `889eee2` (v4.6.0.5, committed 2024-10-18; takkernel 0.59.1), plus prior ecosystem research (see `docs/pathway-c.md` §Prior art).
+- Evidence base: full source clone of `deptofdefense/AndroidTacticalAssaultKit-CIV` @ `889eee2` (v4.6.0.5, committed 2024-10-18; takkernel 0.59.1), plus prior ecosystem research (see `pathway-c.md` §Prior art).
 - Method: static inventory of the actual tree — LOC per module, `android.*` coupling counts, JNI/SWIG surface, GL/EGL call sites, platform-branch CMake analysis, build/CI toolchain audit. All numbers below are measured, not estimated.
 
 ## Headline numbers (measured)
@@ -29,7 +31,7 @@
 | **P2 — Map renders in a native macOS window** (ANGLE-on-Metal as the EGL/GLES provider in the existing GLES-stub slot) | Only **7 engine C++ files** include GLES headers; EGL appears in **zero** non-Android engine C++ — context creation is host-injected by design | **2–3 person-months** | Med-High (ANGLE Metal backend is production-proven in Chromium) |
 | **P3 — CoT round-trip** (commoncommo 44.8K C++ w/ ObjC bindings + takproto protobuf + takcot XSD) | Protocol stack is portable and Apple-first-class; MIT-licensed Swift reference (`flighttactics/TAKTracker`) validates CoT-over-TLS on Apple APIs | **1–2 person-months** | High |
 | **P4 — Core client subset** (map + tracks + chat + KML/shapefile + MRU tools) in native AppKit/Swift UI | This is where the 492K-LOC Android app tax begins: UI, services, permission model, import/export handlers must be rebuilt, not ported | **4–8 person-months** | Med |
-| **P5 — Parity ladder** (rungs defined in `docs/roadmap.md`) to full ATAK-CIV feature parity | 492K LOC of Android app behavior; plugin SDK compatibility is **out of scope** (Android-only artifacts) | **3–5 years** sustained | Low (feature-set drift; upstream is public-GPL and stale since Oct 2024) |
+| **P5 — Parity ladder** (rungs defined in `roadmap.md`) to full ATAK-CIV feature parity | 492K LOC of Android app behavior; plugin SDK compatibility is **out of scope** (Android-only artifacts) | **3–5 years** sustained | Low (feature-set drift; upstream is public-GPL and stale since Oct 2024) |
 
 **Team shape for P0–P4:** 1 C++ build engineer, 2 graphics/engine engineers, 1–2 Swift/AppKit engineers, 1 QA/geospatial. ~**12–18 months** to a deployable core client; 3–6 people.
 
@@ -45,22 +47,22 @@
 
 | Doc | Contents |
 |---|---|
-| `docs/architecture.md` | Verified repo layout, LOC inventory, dependency graph, build/CI reality, third-party stack |
-| `docs/pathway-c.md` | Deep dive: host strategy (JVM vs native Swift), renderer mapping, risk register, prior art |
-| `docs/roadmap.md` | Gate-gated plan G0–G6 with exit criteria, spike checklist, fallback decision points |
-| `docs/ci-qa.md` | CI/QA infrastructure plan: inherited test corpus, CI tiers, runner strategy, golden-fixture/render/perf harness |
-| `docs/pathway-a.md` | Pathway A baseline: the WinTAK-in-VM golden image — build record, smoke test, gotchas, CI use, verified FreeTAKServer CoT round-trip |
-| `spike/g0/NOTES.md` | G0 spike record (done 2026-11-02): engine C++ builds + links as arm64 dylib — wrapper, patch catalog, GLES-stub approach |
+| `architecture.md` | Verified repo layout, LOC inventory, dependency graph, build/CI reality, third-party stack |
+| `pathway-c.md` | Deep dive: host strategy (JVM vs native Swift), renderer mapping, risk register, prior art |
+| `roadmap.md` | Gate-gated plan G0–G6 with exit criteria, spike checklist, fallback decision points |
+| `ci-qa.md` | CI/QA infrastructure plan: inherited test corpus, CI tiers, runner strategy, golden-fixture/render/perf harness |
+| `pathway-a.md` | Pathway A baseline: the WinTAK-in-VM golden image — build record, smoke test, gotchas, CI use, verified FreeTAKServer CoT round-trip |
+| `../spike/g0/NOTES.md` | G0 spike record (done 2026-11-02): engine C++ builds + links as arm64 dylib — wrapper, patch catalog, GLES-stub approach |
 
 `src/` contains the cloned evidence tree (do not modify; pin all citations to `889eee2`).
 
 ## Follow-ups
 
 - **macOS arm64 build spike** (not started): attempt `cmake` of `takkernel/engine` with `MacOSSources.cmake` + Homebrew/vcpkg deps; the single highest-information 2-week experiment.
-- **Pathway A fidelity baseline** — **done 2026-11-01**: WinTAK-CIV 5.8.0.149 golden VM (`wintak-baseline`, snapshot `golden-wintak`) built and smoke-tested under VMPal; see `docs/pathway-a.md`. Feeds `docs/ci-qa.md` §5 and the G6 parity rungs.
-- **Pathway A FTS round-trip** — **done 2026-11-02**: FreeTAKServer container (VMPal Containers, Mac-side) linked to WinTAK over CoT TCP 8087 with a third-party-witnessed WinTAK↔FTS round trip; stacked snapshot `golden-wintak-fts`; see `docs/pathway-a.md` §FTS round-trip.
+- **Pathway A fidelity baseline** — **done 2026-11-01**: WinTAK-CIV 5.8.0.149 golden VM (`wintak-baseline`, snapshot `golden-wintak`) built and smoke-tested under VMPal; see `pathway-a.md`. Feeds `ci-qa.md` §5 and the G6 parity rungs.
+- **Pathway A FTS round-trip** — **done 2026-11-02**: FreeTAKServer container (VMPal Containers, Mac-side) linked to WinTAK over CoT TCP 8087 with a third-party-witnessed WinTAK↔FTS round trip; stacked snapshot `golden-wintak-fts`; see `pathway-a.md` §FTS round-trip.
 
 ## License
 
-GPL-3.0 — see [`LICENSE`](LICENSE). This repo is published under the GNU GPL v3 to match the obligation inherited from the upstream source (`deptofdefense/AndroidTacticalAssaultKit-CIV`, GPL-3.0); the eventual macOS port will carry the same license with its compliance pipeline (see `docs/ci-qa.md` §4 Tier 3).
+GPL-3.0 — see [`LICENSE`](../LICENSE). This repo is published under the GNU GPL v3 to match the obligation inherited from the upstream source (`deptofdefense/AndroidTacticalAssaultKit-CIV`, GPL-3.0); the eventual macOS port will carry the same license with its compliance pipeline (see `ci-qa.md` §4 Tier 3).
 

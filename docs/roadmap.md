@@ -1,6 +1,6 @@
 # Roadmap: ATAK-CIV → Native macOS (Pathway C)
 
-Gate-gated plan. Each gate has: **objective → exit criteria (demo artifact) → fallback if it fails**. A failing gate is a decision point, not a dead end; the two branch points (G1, G2) have pre-analyzed alternates. Estimates assume the team shape in `../README.md`.
+Gate-gated plan. Each gate has: **objective → exit criteria (demo artifact) → fallback if it fails**. A failing gate is a decision point, not a dead end; the two branch points (G1, G2) have pre-analyzed alternates. Estimates assume the team shape in `feasibility-report.md`.
 
 ## G0 — Engine builds on macOS arm64 (the 2-week spike)
 

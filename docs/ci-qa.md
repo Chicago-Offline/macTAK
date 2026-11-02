@@ -1,6 +1,6 @@
 # CI & QA Infrastructure Plan (GitHub)
 
-Companion to `../README.md` (verdict), `architecture.md` (evidence), `pathway-c.md` (design/risks), `roadmap.md` (gates). Everything factual is pinned to clone `src/` @ `889eee2` (v4.6.0.5). Decided before G0 so that Tier 1 exists the day the port repo does.
+Companion to `feasibility-report.md` (verdict), `architecture.md` (evidence), `pathway-c.md` (design/risks), `roadmap.md` (gates). Everything factual is pinned to clone `src/` @ `889eee2` (v4.6.0.5). Decided before G0 so that Tier 1 exists the day the port repo does.
 
 ## 1. What CI must prove
 

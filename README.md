@@ -1,0 +1,50 @@
+# macTAK — TAK for macOS
+
+macTAK is building the **first macOS-native TAK client**: offline maps and team situational awareness on Apple silicon, powered by the open-source **takkernel** engine from ATAK-CIV. The program is evidence-driven — every estimate and design claim in this repo is pinned to measured facts about the upstream source — and gate-gated, with each gate ending in a demoable artifact.
+
+> **Status: development project, pre-release.** G0 (native engine build) closed 2026-11-02; G1 (headless engine + CoT round-trip) is in progress. No usable client exists yet — see [`docs/roadmap.md`](docs/roadmap.md) for the full plan.
+
+## What is TAK?
+
+The Team Awareness Kit (TAK) is the geospatial situational-awareness stack used across public safety and defense: offline maps, team tracking over the **Cursor-on-Target (CoT)** protocol, and interop with servers like **FreeTAKServer**. ATAK-CIV is the US Government's open-source Android client; WinTAK is its closed-source Windows sibling. There is no native macOS TAK client today — that is the gap macTAK fills.
+
+## Target features
+
+| Capability | Status |
+|---|---|
+| Offline map layers via the takkernel engine (GeoPackage, shapefile, …) | 🔵 In progress — G1 runs the engine headless on macOS arm64 |
+| CoT in/out via commoncommo, interoperating with FreeTAKServer | 🔵 In progress — protocol-level round-trip already witnessed |
+| Track persistence via the engine's tracking database | 🔵 In progress — G1 |
+| Native macOS map rendering — ANGLE-on-Metal as the GLES provider | ⚪ Planned — G2 |
+| Core client subset and full ATAK-CIV parity | ⚪ Planned — G4–G6 |
+
+## How the port works
+
+- **The engine already builds natively.** `libtakengine.dylib` (9.6 MB Mach-O arm64, ~460 translation units) compiles and links on macOS, and all five kernel Java modules publish to mavenLocal on Zulu 8 arm64 — proven by the [G0 spike](spike/g0/NOTES.md).
+- **The renderer is a substitution slot.** takkernel consumes OpenGL ES through an injectable provider, so macOS plugs in **ANGLE-on-Metal** — the same backend Chromium ships — rather than porting GL by hand.
+- **Comms are portable.** commoncommo is a C++ core with JNI and Objective-C bindings, alongside takproto (protobuf) and takcot (CoT schemas).
+- **Verification runs against real TAK.** A WinTAK golden VM ([Pathway A](docs/pathway-a.md)) plus a Mac-side FreeTAKServer provide the interop baseline; a WinTAK↔FTS CoT round-trip has already been witnessed at the protocol layer.
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `docs/` | Program documents: feasibility study, architecture evidence, roadmap, CI/QA plan, Pathway A baseline |
+| `spike/` | Gate-spike records — `spike/g0/` holds the G0 build recipe, wrapper, and patch catalog |
+| `src/` | Read-only pinned clone of upstream ATAK-CIV @ `889eee2` (v4.6.0.5) — evidence tree; changes to it are exported as patch files, never committed in place |
+| `reference/` | Test rig: CoT client tools (committed); WinTAK-derived captures (`.gitignore`d — GOTS artifacts never enter this repo) |
+
+## Project documents
+
+| Doc | Contents |
+|---|---|
+| [`docs/feasibility-report.md`](docs/feasibility-report.md) | Founding feasibility study: measured effort, decisive findings, risk — start here for the numbers behind every claim |
+| [`docs/architecture.md`](docs/architecture.md) | Verified repo layout, LOC inventory, dependency graph, build/CI reality |
+| [`docs/pathway-c.md`](docs/pathway-c.md) | Host strategy (JVM vs native Swift), renderer mapping, risk register, prior art |
+| [`docs/roadmap.md`](docs/roadmap.md) | Gate-gated plan G0–G6 with exit criteria and fallback decision points |
+| [`docs/ci-qa.md`](docs/ci-qa.md) | CI/QA plan: inherited test corpus, CI tiers, golden fixtures, runner strategy |
+| [`docs/pathway-a.md`](docs/pathway-a.md) | WinTAK golden VM: build record, FreeTAKServer round-trip verification, gotchas |
+
+## License
+
+GPL-3.0 — see [LICENSE](LICENSE). macTAK inherits the GNU GPL v3 obligation from upstream `deptofdefense/AndroidTacticalAssaultKit-CIV`. This is an independent open-source project — not an official TAK product and not affiliated with the TAK program office.

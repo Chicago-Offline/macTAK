@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>gov.tak.support</groupId>
+  <artifactId>android-port</artifactId>
+  <version>3.1.0</version>
+  <packaging>jar</packaging>
+  <description>macTAK G0 spike transplant: android.jar API-33 framework signatures + TAK classes from the public ATAK-CIV 5.5.1.8 apk (dex2jar) + a JOGLGLES compile stub. Compile-time substitute for the TAK-artifactory-only artifact; not for runtime use.</description>
+  <dependencies>
+    <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId><version>1.7.30</version></dependency>
+  </dependencies>
+</project>

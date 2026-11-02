@@ -28,7 +28,7 @@ concurrency:
 jobs:
   native-engine:
     name: native engine (macOS arm64)
-    runs-on: macos-14
+    runs-on: macos-26 # Xcode 26 toolchain — matches the verified local build; Xcode 15 (macos-14) fails on old libc++ pair constraints
     timeout-minutes: 60
     steps:
       - name: Check out macTAK
@@ -65,7 +65,7 @@ jobs:
 
   jvm-tests:
     name: JVM tests (Zulu 8, macOS arm64)
-    runs-on: macos-14
+    runs-on: macos-26 # matches the locally verified macOS/Zulu 8 arm64 environment
     timeout-minutes: 40
     steps:
       - name: Check out macTAK
@@ -87,6 +87,14 @@ jobs:
           java-version: '8'
           architecture: aarch64
           cache: gradle
+
+      - name: Install android-port transplant to mavenLocal
+        # gov.tak.support:android-port is TAK-artifactory-only; G0 built a
+        # compile-only transplant (see dev/spike/g0/NOTES.md §3). CI installs
+        # the committed jar so the G0 patch's mavenLocal repo resolves it.
+        run: mvn -B org.apache.maven.plugins:maven-install-plugin:3.1.2:install-file
+          -Dfile=dev/spike/g0/transplants/android-port-3.1.0.jar
+          -DpomFile=dev/spike/g0/transplants/android-port-3.1.0.pom
 
       - name: Apply G0 public-source build patch
         run: patch -d src -p1 --forward < dev/spike/g0/patches/gradle-public-source-build.patch

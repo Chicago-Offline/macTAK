@@ -3,3 +3,4 @@
 build/
 native-dist/
 build.log
+hs_err_pid*.log

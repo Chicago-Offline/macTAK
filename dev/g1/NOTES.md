@@ -166,3 +166,95 @@ back (FTS welcome chat `b-t-f` and/or our own marker `a-f-G-U-C`
 echoed by the server). Verified against FreeTAKServer (container, host
 network, tcp/8087): 12 s run → received=2, presenceSent=7, markerSent=1.
 Restart the FTS container between sessions for a clean contact list.
+
+## G1.3 — atak-headless --layer: offline vector layers (engine feature stack)
+
+`atak-headless --layer FILE` is the roadmap's "offline map layer opens"
+criterion, minus the GL: the engine's **native OGR feature provider**
+parses the file, the **native `PersistentDataSourceFeatureDataStore2`**
+persists it (feature-set databases under `--layer-db DIR`, exactly what
+ATAK's overlay manager does on Android), and `FeatureDataStore2` cursors
+read it back. Runs on the engine stack (`build-native.sh`), not the comms
+stack — the launcher picks the entry point from the first flag
+(`--layer` → `mactak.headless.LayerCLI`, else `HeadlessCLI`).
+
+```text
+dev/g1/headless/atak-headless --layer FILE [--layer FILE ...] [--layer-db DIR]
+                              [--expect-features N] [--quiet]
+```
+
+Canary (`dev/g1/headless/test/layer.sh`, a `native-engine` CI step after
+`build-native.sh`): the committed `test/fixtures/sf-landmarks.geojson`
+(3 points, 2 lines, 3 polygons) plus, when `ogr2ogr` is on PATH (it is —
+gdal is a build dep), the same features as **GPKG, KML and shapefile**.
+All four PASS:
+
+```text
+layer sf-landmarks.geojson             8 feature(s) in 41 ms
+set 1    OGR    GeoJSON      sf-landmarks.geojson             8 feature(s)  sf-landmarks.geojson
+1 feature set(s), 8 feature(s) in store
+  fid 4294967297   set 1   Ferry Building               Point              [37.79550 -122.39370 .. 37.79550 -122.39370]
+  fid 4294967300   set 1   Golden Gate Bridge           LineString         [37.80600 -122.47880 .. 37.83240 -122.47500]
+  fid 4294967302   set 1   Golden Gate Park             Polygon            [37.76400 -122.51070 .. 37.77420 -122.45310]
+…
+PASS: 8 feature(s) opened through FeatureDataStore2
+```
+
+### Design decisions
+
+- **GDAL driver registration is a macTAK JNI shim.** On Android the
+  engine's `GdalLibrary.init()` calls `gdal.AllRegister()` through the
+  org.gdal SWIG bindings; Homebrew GDAL ships no Java bindings.
+  `dev/g1/jni-extra/mactak_gdal.cpp` (compiled into
+  `libtakenginejni.dylib` by `build-native.sh`, export checked in its
+  canary gate) exposes the engine's own native
+  `GdalLibrary::init(gdalDataDir)` as `mactak.headless.NativeGdal.init`.
+  The launcher passes `-Dmactak.gdal.data=$(gdal-config --datadir)`
+  (override: `GDAL_DATA`).
+- **The provider set is the one ATAK registers**: `new
+  OgrFeatureDataSource()` (native `OGR_FeatureDataSource2` + KML/GPX/SHP
+  `OGRDriverDefinition2` SPIs); any other GDAL vector driver (GeoJSON,
+  GPKG, …) falls through to `DefaultDriverDefinition2`. Nothing is
+  registered by the C++ library itself — `FeatureDataSourceFactory` is
+  empty until Java registers providers.
+- **slf4j is on the engine-side classpath.** The `java`-target
+  `com.atakmap.coremap.log.Log` logs through slf4j; `slf4j-api` +
+  `slf4j-simple` 1.7.30 (upstream's pin, `gradle/versions.gradle`) are
+  committed transplants (Maven Central, SHA-1 verified on fetch); default
+  level `warn`, `MACTAK_LOG_LEVEL=debug` for engine chatter.
+- **Engine-side Java keeps the `mactak.headless` package** (under
+  `headless/src/`) because the JNI shim's symbol name is derived from it;
+  the comms-side `HeadlessCLI` stays flat in the default package as
+  G1.2 left it.
+
+### Traps found on the way (do not rediscover these)
+
+Continuing G1.2's numbering (these are traps 12–14):
+
+1. **No GDAL drivers unless something calls `GDALAllRegister`.** Symptom:
+   `ERROR 4: No driver registered` from OGR and
+   `PersistentDataSourceFeatureDataStore2.add()` returning `false` with no
+   exception. Nothing in `libtakengine` registers drivers on load; the
+   shim above must run before the first provider touches GDAL.
+2. **Never call `FeatureCursor.get()` / `Feature.getStyle()` on the JVM.**
+   Materialising a `Feature` parses its style, and
+   `FeatureStyleParser.<clinit>` builds an `android.util.LruCache` — a
+   `"Stub!"` in the android-port transplant (the predicted trap from the
+   G1.1 smoke contract, now met for real). Read through the cursor's
+   `FeatureDefinition` view instead: `getRawGeometry()` +
+   `getGeomCoding()` + `GeometryFactory.parseWkb/parseSpatiaLiteBlob`.
+3. **The first engine code path that logs needs slf4j on the classpath**
+   — `NativeFeatureDataStore2.finalize` threw
+   `NoClassDefFoundError: org/slf4j/LoggerFactory` after a run that had
+   otherwise succeeded. The G1.1 smoke never logged, so this stayed
+   hidden until M3.
+
+### Known-benign noise
+
+- `WARN … Native FeatureDataStore2 leaked` on close: upstream's
+  `PersistentDataSourceFeatureDataStore2.dispose()` destructs its own
+  pointer and then calls `impl.finalize()`, which only checks the base
+  view's (never-zeroed) pointer. Not a leak; the native object is gone.
+- `SQLITE [SQL logic error] no such column: definition_12_063` on GPKG:
+  GDAL 3.13 probes the optional WKT2 column of `gpkg_spatial_ref_sys`;
+  files written without it log once and open fine.

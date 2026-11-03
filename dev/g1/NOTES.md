@@ -134,7 +134,9 @@ core/impl + insert.py; patch must be a scoped `git diff -- core/impl`).
 
 ### Traps found on the way (do not rediscover these)
 
-8. **commo fires `interfaceUp` BEFORE the context enters its sendable
+Continuing G1.1's numbering (these are traps 8–11):
+
+1. **commo fires `interfaceUp` BEFORE the context enters its sendable
    `upContexts` list** (streamingsocketmanagement.cpp: fireInterfaceChange,
    then insert). A broadcast sent inside the interfaceUp callback iterates
    zero contexts — broadcastCoT returns success while queueing nothing,
@@ -143,18 +145,18 @@ core/impl + insert.py; patch must be a scoped `git diff -- core/impl`).
    from the callback; a sender thread announces presence on a 2 s
    heartbeat (mirroring ATAK's SA cadence) starting 500 ms after
    iface-up, and the marker rides the first send window.
-9. **The generator must own its BASE path**: insert.py once pointed at a
+2. **The generator must own its BASE path**: insert.py once pointed at a
    stale `/tmp/gt` copy while every retry reset the pristine repo —
    inserts piled up on already-patched files (the close-sites assert saw
    4 instead of 2). Keep generator + tree in one repo and
    `git checkout -- core/impl` before each run.
-10. **brew protoc ≥27 no longer emits C++11** — pb objects are
-    precompiled at -std=c++17 (build-commo.sh) so the 2016 core can stay
-    C++11. Related: ld64 records only libs that resolved a symbol, so
-    protobuf's absl deps are swept explicitly on the link line.
-11. **install_name_tool invalidates the linker signature** — ad-hoc
-    codesign after every install_name change (arm64 refuses unsigned
-    dylibs).
+3. **brew protoc ≥27 no longer emits C++11** — pb objects are
+   precompiled at -std=c++17 (build-commo.sh) so the 2016 core can stay
+   C++11. Related: ld64 records only libs that resolved a symbol, so
+   protobuf's absl deps are swept explicitly on the link line.
+4. **install_name_tool invalidates the linker signature** — ad-hoc
+   codesign after every install_name change (arm64 refuses unsigned
+   dylibs).
 
 ### Round-trip contract (verified)
 
@@ -164,4 +166,3 @@ back (FTS welcome chat `b-t-f` and/or our own marker `a-f-G-U-C`
 echoed by the server). Verified against FreeTAKServer (container, host
 network, tcp/8087): 12 s run → received=2, presenceSent=7, markerSent=1.
 Restart the FTS container between sessions for a clean contact list.
-

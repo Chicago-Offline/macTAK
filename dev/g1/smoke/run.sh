@@ -10,8 +10,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEV="$(cd "$HERE/.." && pwd)"
-ROOT="$(cd "$DEV/.." && pwd)"
+DEV="$(cd "$HERE/.." && pwd)"     # <repo>/dev/g1
+ROOT="$(cd "$DEV/../.." && pwd)"  # <repo>
 DIST="${1:-$DEV/native-dist}"
 DIST="$(cd "$DIST" && pwd)"   # System.load needs absolute paths
 VER="${TAKKERNEL_VER:-0.59.1}"
@@ -30,7 +30,7 @@ jar() { # jar <mavenLocal-path> <committed-path> — prints the first that exist
   if [[ -f "$1" ]]; then echo "$1"; else echo "$2"; fi
 }
 KERNEL_M2="$M2/gov/tak/kernel"
-TRANS="$DEV/g1/transplants"
+TRANS="$DEV/transplants"
 CP="$(jar "$KERNEL_M2/takkernel-engine/$VER/takkernel-engine-$VER.jar" \
         "$TRANS/takkernel-engine-$VER.jar")"
 CP="$CP:$(jar "$KERNEL_M2/takkernel-port/$VER/takkernel-port-$VER.jar" \

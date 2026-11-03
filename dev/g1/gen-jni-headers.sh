@@ -33,9 +33,10 @@ while IFS= read -r line; do
   hdr="${line%%=*}"            # e.g. jdatabaseimpl.h or c3dt/jgltf.h
   classes="${line#*=}"         # comma-separated FQCNs
   mkdir -p "$OUT/$(dirname "$hdr")"
-  # shellcheck disable=SC2086
-  "$JAVAH" -classpath "$CP" -o "$OUT/$hdr" \
-    $(echo "$classes" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  cls=()
+  while IFS= read -r c; do cls+=("$c"); done \
+    < <(echo "$classes" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  "$JAVAH" -classpath "$CP" -o "$OUT/$hdr" "${cls[@]}"
   CLASSES_OK=$((CLASSES_OK+1))
 done < <(grep -E '^[A-Za-z].*\.h=' \
   "$ROOT/src/takkernel/engine/src/main/jni/javah.properties")

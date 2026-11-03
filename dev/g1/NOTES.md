@@ -13,7 +13,7 @@ JVM (Zulu 8) does `System.load` on both, then drives
 `DatabaseImpl.openOrCreate → CREATE/INSERT/SELECT` through the full stack
 Java → JNI glue → C++ Database2 → sqlite → Java and reads back **42**.
 
-```
+```text
 [smoke] java 1.8.0_512 (OpenJDK 64-Bit Server VM)
 [smoke] libtakengine.dylib loaded (core, no JNI exports)
 [smoke] libtakenginejni.dylib loaded (JNI_OnLoad ran)
@@ -52,7 +52,9 @@ artifact** here (`dev/g1/jni-include/`, 78 files) generated exactly like
 upstream (`gradle/javah.gradle`: `javah -o <header> <classes...>` per
 `javah.properties` line, so multi-class entries concatenate):
 
-    dev/g1/gen-jni-headers.sh        # needs zulu-8 + mavenLocal jars
+```bash
+dev/g1/gen-jni-headers.sh        # needs zulu-8 + mavenLocal jars
+```
 
 Regenerate ONLY at an engine version bump (bump `TAKKERNEL_VER`, publish,
 run, commit the diff). This keeps the native build hermetic — no JDK, no

@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+#
+# atak-headless — run macTAK's comms stack headless (no ATAK UI) on macOS.
+#
+# Compiles dev/g1/headless/HeadlessCLI.java on the fly against the staged
+# jcommoncommo.jar and runs it on Zulu 8 with the staged dylibs (built by
+# dev/g1/build-commo.sh). The live CoT round-trip against FTS lives in
+# run.sh next to this script.
+#
+# usage: atak-headless --connect host:port [--uid UID] [--callsign CS]
+#                      [--duration SECONDS] [--send-marker LAT LON]
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+G1="$(cd "$HERE/.." && pwd)"
+DIST="$G1/native-dist"
+CLASSES="$G1/build-commo/headless-classes"
+
+[[ -f "$DIST/libcommoncommojni.dylib" && -f "$DIST/jcommoncommo.jar" ]] \
+  || { echo "atak-headless: comms stack not staged — run $G1/build-commo.sh" >&2; exit 1; }
+
+JDK="${JAVA_HOME:-$( /usr/libexec/java_home -v 1.8 2>/dev/null || true )}"
+[[ -n "$JDK" ]] || { echo "atak-headless: JDK 1.8 not found" >&2; exit 1; }
+
+rm -rf "$CLASSES"
+mkdir -p "$CLASSES"
+"$JDK/bin/javac" -cp "$DIST/jcommoncommo.jar" -d "$CLASSES" "$HERE/HeadlessCLI.java"
+
+exec "$JDK/bin/java" \
+  -cp "$DIST/jcommoncommo.jar:$CLASSES" \
+  -Datakheadless.dist="$DIST" \
+  -Djava.awt.headless=true \
+  HeadlessCLI "$@"

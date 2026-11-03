@@ -1,4 +1,5 @@
-# Tier 1 per docs/ci-qa.md: native-engine PR gate, JVM kernel tests, shell/workflow lint.
+# Tier 1 per docs/ci-qa.md: native-engine PR gate, comms-stack gate, JVM
+# kernel tests, shell/workflow lint.
 #
 # `src/` is local-only (gitignored): CI materializes the upstream ATAK CIV tree at
 # the same pinned commit the local build uses. dev/g1/build-native.sh runs
@@ -75,6 +76,51 @@ jobs:
             dev/g1/native-dist/libtakengine.dylib
             dev/g1/native-dist/libGLESv2-stub.dylib
             dev/g1/native-dist/takengine-tests.xml
+          if-no-files-found: warn
+
+  commo-stack:
+    name: comms stack (macOS arm64)
+    runs-on: macos-26 # Xcode 26 toolchain — matches the verified local build
+    timeout-minutes: 30
+    steps:
+      - name: Check out macTAK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check out upstream ATAK CIV at the pinned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: deptofdefense/AndroidTacticalAssaultKit-CIV
+          ref: 889eee292c43d3d2eafdd1f2fbf378ad5cd89ecc # keep in sync with local src/ (docs/ci-qa.md)
+          path: src
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install comms dependencies (Homebrew)
+        # build-commo.sh preflight list; protoc ships with protobuf
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: brew install openssl@3 libxml2 protobuf libmicrohttpd curl
+
+      - name: Set up Zulu 8 (arm64) — javah for the JNI glue + load canary
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: zulu
+          java-version: '8'
+          architecture: aarch64
+
+      - name: Build comms stack + canaries (dev/g1/build-commo.sh, verbatim)
+        run: bash dev/g1/build-commo.sh
+
+      - name: Upload comms artifacts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: commo-stack-macos-arm64
+          path: |
+            dev/g1/native-dist/libcommoncommo.dylib
+            dev/g1/native-dist/libcommoncommojni.dylib
+            dev/g1/native-dist/jcommoncommo.jar
           if-no-files-found: warn
 
   jvm-tests:

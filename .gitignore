@@ -10,3 +10,9 @@
 
 # WinTAK UI captures + session evidence (GOTS-derived artifacts, local only)
 /dev/reference/captures/
+
+# G1.2 comms stack: throwaway build tree (wiped/rebuilt by dev/g1/build-commo.sh)
+/dev/g1/build-commo/
+
+# G1 probe/build logs (diagnostics, not evidence)
+/dev/g1/*.log

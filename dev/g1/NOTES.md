@@ -113,3 +113,56 @@ JDK; the smoke does). `build-native.sh` still runs verbatim.
 - c3dt + VSI TUs rejoin at the ttp-dist rung; SQLCipher at the encryption
   rung; core install_name stays build-absolute (native-dist is built and
   consumed on the same machine — revisit if dylibs ever ship cross-machine).
+
+## G1.2 — atak-headless: CoT round-trip (commoncommo build + streaming iface)
+
+Build: `bash dev/g1/build-commo.sh` stages the comms stack into
+`native-dist/` (`libcommoncommo.dylib`, `libcommoncommojni.dylib`,
+`jcommoncommo.jar`) from the local commoncommo tree +
+`patches/commo/*.patch` (-p1, relative to the copy root — keep separate
+from the -p3 engine patches). Runtime: `dev/g1/headless/atak-headless`
+(compiles HeadlessCLI.java on the fly, Zulu 8); live round-trip smoke:
+`dev/g1/headless/run.sh` (needs FreeTAKServer on 127.0.0.1:8087).
+
+### Diagnostics (patches/commo/0001-diag-socketRead-errno.patch)
+
+Five WARNING-level `[commo-diag]` probes in commo: socketRead
+(errno + local port), both `::close(fd)` sites (local port), sendBroadcast
+(type + ups), the io-tx queue check (q/blocked/doTx), and the io-tx write
+(w/r). Regenerate from the generator repo `g1-commo-gen` (pristine
+core/impl + insert.py; patch must be a scoped `git diff -- core/impl`).
+
+### Traps found on the way (do not rediscover these)
+
+Continuing G1.1's numbering (these are traps 8–11):
+
+1. **commo fires `interfaceUp` BEFORE the context enters its sendable
+   `upContexts` list** (streamingsocketmanagement.cpp: fireInterfaceChange,
+   then insert). A broadcast sent inside the interfaceUp callback iterates
+   zero contexts — broadcastCoT returns success while queueing nothing,
+   and no byte ever reaches the wire. Diag signature: `sendBroadcast
+   type=0 ups=0` and no `io-tx` lines. Fix in HeadlessCLI: never send
+   from the callback; a sender thread announces presence on a 2 s
+   heartbeat (mirroring ATAK's SA cadence) starting 500 ms after
+   iface-up, and the marker rides the first send window.
+2. **The generator must own its BASE path**: insert.py once pointed at a
+   stale `/tmp/gt` copy while every retry reset the pristine repo —
+   inserts piled up on already-patched files (the close-sites assert saw
+   4 instead of 2). Keep generator + tree in one repo and
+   `git checkout -- core/impl` before each run.
+3. **brew protoc ≥27 no longer emits C++11** — pb objects are
+   precompiled at -std=c++17 (build-commo.sh) so the 2016 core can stay
+   C++11. Related: ld64 records only libs that resolved a symbol, so
+   protobuf's absl deps are swept explicitly on the link line.
+4. **install_name_tool invalidates the linker signature** — ad-hoc
+   codesign after every install_name change (arm64 refuses unsigned
+   dylibs).
+
+### Round-trip contract (verified)
+
+`run.sh` passes when: iface-up seen, presence + marker tx'd
+(commo diag shows full-size `io-tx write w=N r=N`), and ≥1 CoT arrives
+back (FTS welcome chat `b-t-f` and/or our own marker `a-f-G-U-C`
+echoed by the server). Verified against FreeTAKServer (container, host
+network, tcp/8087): 12 s run → received=2, presenceSent=7, markerSent=1.
+Restart the FTS container between sessions for a clean contact list.

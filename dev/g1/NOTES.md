@@ -122,7 +122,8 @@ Build: `bash dev/g1/build-commo.sh` stages the comms stack into
 `patches/commo/*.patch` (-p1, relative to the copy root — keep separate
 from the -p3 engine patches). Runtime: `dev/g1/headless/atak-headless`
 (compiles HeadlessCLI.java on the fly, Zulu 8); live round-trip smoke:
-`dev/g1/headless/run.sh` (needs FreeTAKServer on 127.0.0.1:8087).
+`dev/g1/headless/run.sh` (two clients against any plaintext-CoT TAK
+server; `TAK_HOST`/`TAK_PORT`, default 127.0.0.1:8087).
 
 ### Diagnostics (patches/commo/0001-diag-socketRead-errno.patch)
 
@@ -134,7 +135,7 @@ core/impl + insert.py; patch must be a scoped `git diff -- core/impl`).
 
 ### Traps found on the way (do not rediscover these)
 
-Continuing G1.1's numbering (these are traps 8–11):
+Continuing G1.1's numbering (these are traps 8–12):
 
 1. **commo fires `interfaceUp` BEFORE the context enters its sendable
    `upContexts` list** (streamingsocketmanagement.cpp: fireInterfaceChange,
@@ -157,15 +158,26 @@ Continuing G1.1's numbering (these are traps 8–11):
 4. **install_name_tool invalidates the linker signature** — ad-hoc
    codesign after every install_name change (arm64 refuses unsigned
    dylibs).
+5. **A TAK server does not reflect a client's own events back to it.**
+   The original one-client `run.sh` passed only because FreeTAKServer
+   sends a welcome GeoChat (`b-t-f`) and echoes the sender's marker;
+   OpenTAKServer does neither (`received=0` → FAIL, while the bytes were
+   on the wire and visible to other clients). A round-trip proof needs a
+   second client: `run.sh` now runs A (listener) and B (presence +
+   marker) and asserts each saw the other.
 
 ### Round-trip contract (verified)
 
-`run.sh` passes when: iface-up seen, presence + marker tx'd
-(commo diag shows full-size `io-tx write w=N r=N`), and ≥1 CoT arrives
-back (FTS welcome chat `b-t-f` and/or our own marker `a-f-G-U-C`
-echoed by the server). Verified against FreeTAKServer (container, host
-network, tcp/8087): 12 s run → received=2, presenceSent=7, markerSent=1.
-Restart the FTS container between sessions for a clean contact list.
+`run.sh` passes when: both ifaces up, B's presence + marker tx'd (commo
+diag shows full-size `io-tx write w=N r=N`), A logged
+`contact-added <B>` and received B's marker (`uid="<B>-m1"`,
+`a-f-G-U-C`), B received A's presence (`t-x-a-t-a-k`). Verified against
+**OpenTAKServer** (`steintak`, tcp/8088, 2026-11-03): 12 s run → A
+`received=7` (6 presence + marker), B `received=7`, each side
+`contact-added` the other. Earlier one-client form verified against
+FreeTAKServer (container, host network, tcp/8087): received=2 (welcome
+chat + echoed marker). Restart the FTS container between sessions for a
+clean contact list; OTS needs no reset.
 
 ## G1.3 — atak-headless --layer: offline vector layers (engine feature stack)
 
@@ -229,7 +241,7 @@ PASS: 8 feature(s) opened through FeatureDataStore2
 
 ### Traps found on the way (do not rediscover these)
 
-Continuing G1.2's numbering (these are traps 12–14):
+Continuing G1.2's numbering (these are traps 13–15):
 
 1. **No GDAL drivers unless something calls `GDALAllRegister`.** Symptom:
    `ERROR 4: No driver registered` from OGR and

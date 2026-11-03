@@ -49,6 +49,16 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: '1'
         run: brew install cmake rsync proj geos gdal libspatialite minizip nlohmann-json laszip googletest
 
+      - name: Set up Zulu 8 (arm64) for the JNI smoke canary
+        # build-native.sh itself needs no JDK (jni.h is pinned at
+        # dev/g1/jdk-include) but its final canary loads the engine in a
+        # JVM (dev/g1/smoke/run.sh).
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: zulu
+          java-version: '8'
+          architecture: aarch64
+
       - name: Build engine + canary (dev/g1/build-native.sh, verbatim)
         run: bash dev/g1/build-native.sh
 

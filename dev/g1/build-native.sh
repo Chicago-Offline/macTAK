@@ -11,6 +11,12 @@
 #   → libtakengine.dylib staged in dev/g1/native-dist/
 #   → canary: dlopen + Catch2 subset of engine/src/test/cpp
 #
+# G1.1 addition: also builds the JNI glue (engine/src/main/jni) into
+# libtakenginejni.dylib so the engine loads IN-PROCESS from a real JVM
+# (System.load + named Java_* exports), and canaries that with
+# dev/g1/smoke/run.sh: open a SQLite db through the engine's own JNI
+# stack and read back 42.
+#
 # Everything lands under g1/build (wiped each run) for reproducibility.
 # A clean build is ~4–5 min at -j$(hw.ncpu).
 set -euo pipefail
@@ -119,11 +125,14 @@ if(TARGET takengine)
     endforeach()
     set_target_properties(takengine PROPERTIES SOURCES "${_kept}")
 
-    # Drop ttp-dist libs; GLESv2 -> stub; append system sqlite3.
+    # Drop ttp-dist libs; GLESv2 -> stub; append sqlite3. Bare `sqlite3`
+    # resolves to /usr/lib (system) and then COLLIDES with libspatialite's
+    # brew sqlite at runtime (two runtimes, SIGSEGV in findElementWithHash)
+    # — pin the full brew path so the whole process shares one sqlite.
     get_target_property(_libs takengine LINK_LIBRARIES)
     list(REMOVE_ITEM _libs las las_c charset GLESv2)
     list(APPEND _libs ${WORK}/gles-stub/libGLESv2.dylib)
-    list(APPEND _libs sqlite3)
+    list(APPEND _libs /opt/homebrew/opt/sqlite/lib/libsqlite3.dylib)
     set_target_properties(takengine PROPERTIES LINK_LIBRARIES "${_libs}")
 
     # ---------------------------------------------------------------
@@ -164,6 +173,73 @@ if(TARGET takengine)
     set_target_properties(takengine-tests PROPERTIES
         BUILD_RPATH "${CMAKE_BINARY_DIR}/engine-cpp;${WORK}/gles-stub"
     )
+
+    # ---------------------------------------------------------------
+    # G1.1: JNI glue (engine/src/main/jni) -> libtakenginejni.dylib.
+    # Named Java_* exports let the JVM load the engine in-process
+    # (System.load; JNI_OnLoad in the glue's common.cpp wires globals).
+    # Sources come from upstream's jni/cmake/{Common,MacOS}Sources.cmake;
+    # c3dt/ GLTF TUs are dropped with the 3D-tiles rung. The javah
+    # headers are a pinned committed artifact (dev/g1/jni-include,
+    # regenerate with dev/g1/gen-jni-headers.sh at engine version
+    # bumps) and dev/g1/jdk-include pins jni.h/jni_md.h so this native
+    # build needs no JDK installed.
+    # ---------------------------------------------------------------
+    set(JNI_DIR ${WORK}/engine/jni)   # rsync flattens src/main/ into build/engine/
+    set(SRC_DIR ${JNI_DIR})   # variable name upstream CommonSources.cmake expects
+    include(${JNI_DIR}/cmake/CommonSources.cmake)
+    include(${JNI_DIR}/cmake/MacOSSources.cmake)
+
+    set(takenginejni_DEFS ${takenginejni_MACOS_DEFS})
+    list(REMOVE_ITEM takenginejni_DEFS SQLITE_HAS_CODEC)  # same SQLCipher rung as core
+
+    set(takenginejni_SRCS ${takenginejni_COMMON_SRCS} ${takenginejni_MACOS_SRCS})
+    set(_jni_kept)
+    foreach(_s IN LISTS takenginejni_SRCS)
+        # c3dt: 3D tiles/GLTF rung. vsi_jfile + its JNI wrapper: GDAL
+        # VSI API drift (same drift family as the LAS exclusion above —
+        # overrides pre-drift VSIFilesystemHandler signatures; revisit
+        # with the ttp-dist rung).
+        if(NOT _s MATCHES "/c3dt/|vsi_jfile\\.cpp|jvsijfilefilesystemhandler\\.cpp")
+            list(APPEND _jni_kept ${_s})
+        endif()
+    endforeach()
+
+    add_library(takenginejni SHARED ${_jni_kept})
+    target_compile_definitions(takenginejni PRIVATE ${takenginejni_DEFS}
+        # libkml's renamed minizip -> Homebrew minizip (same as core)
+        libkml_unzClose=unzClose
+        libkml_unzOpen=unzOpen
+        libkml_unzOpenCurrentFile=unzOpenCurrentFile
+        libkml_unzReadCurrentFile=unzReadCurrentFile
+        libkml_unzGetGlobalInfo=unzGetGlobalInfo
+        libkml_unzGetGlobalComment=unzGetGlobalComment
+        libkml_unzGoToFirstFile=unzGoToFirstFile
+        libkml_unzGoToNextFile=unzGoToNextFile
+        libkml_unzLocateFile=unzLocateFile
+        libkml_unzGetCurrentFileInfo=unzGetCurrentFileInfo
+    )
+    target_include_directories(takenginejni PRIVATE
+        ${JNI_DIR}
+        ${WORK}/engine/cpp
+        /opt/homebrew/include
+        ${SRC}/src/khronos/OpenGL/api   # GLES3/gl3.h (GLES-stub slot)
+        ${SRC}/src/khronos/EGL/api      # EGL + KHR/khrplatform.h
+        ${SRC}/src/stl-soft/include     # platformstl/*
+        ${WORK}/overlay                 # tinygltf/json.hpp stand-in
+        ${SRC}/dev/g1/jni-include       # pinned javah output
+        ${SRC}/dev/g1/jdk-include       # pinned jni.h + jni_md.h
+    )
+    target_link_directories(takenginejni PRIVATE /opt/homebrew/lib)
+    target_link_libraries(takenginejni PRIVATE takengine
+        ${WORK}/gles-stub/libGLESv2.dylib
+        /opt/homebrew/opt/sqlite/lib/libsqlite3.dylib
+        gdal
+        minizip
+    )
+    set_target_properties(takenginejni PROPERTIES
+        BUILD_RPATH "${CMAKE_BINARY_DIR}/engine-cpp;${WORK}/gles-stub"
+    )
 endif()
 CMAKE
 sed -e "s|@ROOT@|$ROOT|g" -e "s|@WORK@|$WORK|g" \
@@ -194,9 +270,17 @@ log "canary 2/2: engine C++ tests (GTest)"
 # --- stage ---------------------------------------------------------------
 log "staging → $OUT"
 cp "$WORK/cmake/engine-cpp/libtakengine.dylib" "$OUT/"
+cp "$WORK/cmake/libtakenginejni.dylib" "$OUT/"
 cp "$WORK/gles-stub/libGLESv2.dylib" "$OUT/libGLESv2-stub.dylib"
-file "$OUT/libtakengine.dylib"
-otool -L "$OUT/libtakengine.dylib" | sed 's/^/  /'
+
+# --- canary --------------------------------------------------------------
+log "canary 3/3: JVM in-process load (JNI glue)"
+nm -gU "$WORK/cmake/libtakenginejni.dylib" | grep 'Java_com_atakmap_database_impl_DatabaseImpl_openImpl' >/dev/null \
+  || die "libtakenginejni.dylib is missing the DatabaseImpl JNI exports"
+"$DEV/g1/smoke/run.sh" "$OUT"
+
+file "$OUT/libtakengine.dylib" "$OUT/libtakenginejni.dylib"
+otool -L "$OUT/libtakenginejni.dylib" | sed 's/^/  /'
 ls -lh "$OUT"
 
-log "G1.0 OK — dylib built, canary green, artifacts in g1/native-dist/"
+log "G1.0/G1.1 OK — dylibs built, canaries green, artifacts in g1/native-dist/"

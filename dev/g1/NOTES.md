@@ -1,6 +1,6 @@
 # dev/g1 — G1: JVM host + native JNI glue (macOS arm64)
 
-## State (G1): M1–M3 DONE — CI green; remaining: track persistence (tracks DB) + the exit demo (received CoT plotted in-memory)
+## State (G1): M1–M4 DONE — G1 exit criteria met: engine + comms in one JVM, CoT in/out persisted to the engine's tracks DB, offline layers open; witnessed on OpenTAKServer (TCP + SSL) and hermetically in CI
 
 `dev/g1/build-native.sh` now produces **two** dylibs:
 
@@ -270,3 +270,135 @@ Continuing G1.2's numbering (these are traps 13–15):
 - `SQLITE [SQL logic error] no such column: definition_12_063` on GPKG:
   GDAL 3.13 probes the optional WKT2 column of `gpkg_spatial_ref_sys`;
   files written without it log once and open fine.
+
+## G1.4 — one JVM, both stacks: tracks DB + the exit demo
+
+`atak-headless` is now a single entry point (`mactak.headless.HeadlessCLI`)
+that loads **all four** dylibs into one process — `libtakengine` +
+`libtakenginejni` (engine) and `libcommoncommo` + `libcommoncommojni`
+(comms) — with `jcommoncommo.jar` and the takkernel jars on one classpath.
+`--layer` dispatches to `LayerCLI.run` (G1.3); everything else is the CoT
+endpoint (G1.2), which now persists every received `<event>` through the
+engine's `DatabaseImpl` JNI (Java → glue → C++ Database2 → sqlite) into a
+tracks DB and prints the newest fix per uid on exit — the roadmap's
+"streams positions both ways and plots them in-memory":
+
+```text
+atak-headless --connect HOST:PORT [--db PATH] [--cert CLIENT.p12 --ca TRUSTSTORE.p12] ...
+headless: track uid=g1-rt-m2uehlair-b     type=a-f-G-U-C callsign=G1-RT-M2UEHLAIR-B    lat=0.000000  lon=0.000000   time=… fixes=8
+headless: track uid=g1-rt-m2uehlair-b-m1  type=a-f-G-U-C callsign=G1-RT-M2UEHLAIR-B-M1 lat=37.774900 lon=-122.419400 time=… fixes=1
+headless: tracks uids=2 fixes=9 db=/tmp/a.sqlite
+```
+
+`--db PATH` persists to a file; without it the engine opens a private
+temporary database (`DatabaseImpl.openOrCreate(null)` → `sqlite3_open_v2("")`),
+so the exit demo always runs. `run.sh` gives each client its own DB and
+asserts A's holds B's presence + marker (from the exit demo and, independently,
+by reading the file back with the `sqlite3` CLI) and B's holds A's presence.
+
+`--cert` + `--ca` (the two PKCS#12 files in an ATAK data package; passwords
+via `MACTAK_CERT_PASS` / `MACTAK_CA_PASS`, default `atakatak`) switch commo's
+streaming interface to SSL with a client certificate — OpenTAKServer's 8089.
+`run.sh` passes them through as `TAK_CERT` / `TAK_CA`.
+
+Verified 2026-11-04 against **OpenTAKServer** (`steintak`) on **both**
+tcp/8088 and ssl/8089 (two distinct data-package certs also tried): A
+`received=9 persisted=9`, B `received=8 persisted=8`, PASS. CI
+(`cot-roundtrip.yml`) builds both stacks and runs the same `run.sh` against
+`fake-cot-server.py`; `ci.yml`'s `native-engine` job now also builds commo
+before the layer canary, since the launcher requires both.
+
+### Design decisions
+
+- **`HeadlessCLI` moved into `src/mactak/headless/`** (git rename) so one
+  `javac` compiles one tree against one classpath and there is one `main`.
+  `LayerCLI.main` became `LayerCLI.run(String[])`; native loading lives only
+  in `HeadlessCLI` (`-Dmactak.native.dist`, engine before comms, core before
+  glue per stack).
+- **`CotEvent` / `TrackStore`** are the G1.2-era pure-Java pieces ported from
+  the `archive/g1-m3-on-javatcp` branch: a DOM parser (XXE-hardened: no
+  DTDs, no external entities) for `<event>`/`<point>`/`<contact callsign>`,
+  and an append-only `tracks` table with a `(uid, id)` index; `latest()` is
+  one `MAX(id) GROUP BY uid` join with per-uid counts. `TrackStore` methods
+  are synchronized (commo's rx thread vs. main at exit) and `record` is a
+  no-op after `close` so a late callback cannot hit a closed handle. Server
+  pings (`t-x-c-t`) are not recorded.
+- **The presence is a real self-SA** (`a-f-G-U-C` + `<takv>`, `<contact
+  endpoint callsign>`, `<uid Droid>`, `<__group>`, `<status>`, `<track>`),
+  not the G1.2 `t-x-a-t-a-k` ping, and `stale` is now in the future for both
+  presence and marker (G1.2 had `stale == time`). See trap 17.
+- **OpenSSL legacy provider shim** `dev/g1/jni-extra/mactak_ssl.cpp`
+  (`NativeSsl.loadLegacyProvider`), compiled into `libcommoncommojni` by
+  `build-commo.sh` (the jni Makefile globs `*.cpp`); export + single-libcrypto
+  checks added to its canary. See traps 19–20.
+
+### Traps found on the way (do not rediscover these)
+
+Continuing G1.3's numbering (these are traps 16–21):
+
+1. **OpenTAKServer registers an EUD only from a self-SA** — a parseable
+   `<event>` carrying `uid`, `<contact callsign>` and preferably `<__group>`
+   (`EudHandler.parse_device_info`). Until then the per-client RabbitMQ
+   consumer is never started: the socket is up, bytes are accepted, nothing
+   ever comes back. The G1.2 `t-x-a-t-a-k` ping with no group (and
+   `stale == time`) stopped registering after the server was rebuilt; it had
+   passed on 2026-11-03 by luck of server state.
+2. **OTS declares a durable RabbitMQ queue per EUD uid, bound to its `cot`
+   fan-out exchange, and never deletes it.** A fresh uid per `run.sh` run
+   (`g1-rt-<epoch>-a/b`) leaked two bound, unconsumed queues per run; every
+   CoT was copied into each until the broker alarmed and blocked all fan-out
+   for every client. `run.sh` now uses stable per-host uids
+   (`g1-rt-<hostname>-a/b`, `TAK_UID_PREFIX` to override). The `auto_delete`
+   fix belongs in OTS; any new real device leaks the same way.
+3. **OTS drops every CoT from a uid whose callsign is registered to a
+   different uid** — silently (the `cot_parser` worker fails before
+   `route_cot`; the sender sees nothing, receivers see nothing from it).
+   Reusing `G1RT-A/-B` across different uids triggered it. `run.sh` derives
+   callsigns from the uids (`G1-RT-<HOST>-A`). Bisected with a raw-socket
+   sender while an `atak-headless` listener watched: identical bytes with a
+   fresh callsign pass, with the colliding one fail.
+4. **Data-package PKCS#12 is RC2-40** (`pbeWithSHA1And40BitRC2-CBC`, the
+   OpenSSL ≤1.1 default OTS and TAK Server still emit); OpenSSL 3 decrypts it
+   only with its legacy provider, so commo's `PKCS12_parse` fails with
+   `Invalid format for client cert`. Java 8's `KeyStore` cannot re-wrap it
+   either (its PKCS12 writer is RC2-40-only; the `keystore.pkcs12.*`
+   properties are ignored). Fix: `NativeSsl.loadLegacyProvider()` before the
+   first `addStreamingInterface` with a cert (loads `legacy` **and**
+   `default` — explicitly loading one provider disables the implicit default).
+5. **Two OpenSSL runtimes in one process** (the sqlite trap, again).
+   `libcommoncommo` was linking **openssl@4** (`/opt/homebrew/lib/libcrypto.dylib`
+   follows whichever `openssl@N` brew linked last) while the JNI glue linked
+   the shim's openssl@3 — so the legacy provider loaded into a libcrypto commo
+   never called. `build-commo.sh` puts `-L$WORK/shim/lib` first in
+   `CORE_CXXFLAGS` (the Makefile's `-L$(TAKTHIRDPARTYDIR)/lib` comes after
+   `CXXFLAGS` on the link line) and its canary asserts both dylibs resolve
+   `openssl@3/lib/libcrypto`.
+6. **commo frames on `</event>` and writes `<?xml …?>\n<event…/>` with no
+   trailing newline**; the fake server framed on newlines and prefixed its
+   own broadcasts with an XML prolog. Relayed events arrived glued to the
+   next prolog (`Invalid CoT message received from stream`, pre-existing on
+   main), and once that was fixed the leftover `\n` before the server's own
+   prolog still broke libxml2 (a declaration must be byte 0).
+   `fake-cot-server.py` now frames inbound on `</event>`, drops prologs, and
+   sends its own events without one.
+
+### Known-benign noise
+
+- **Old CoT replayed on connect**: OTS's per-uid queue is durable and keeps
+  accumulating while the client is away (until `OTS_RABBITMQ_TTL`), so the
+  first seconds after connecting deliver whatever arrived since the last
+  run. The tracks DB records them with their original `time`.
+- `run.sh`'s `nc -z -G` reachability probe is a plain TCP connect, also fine
+  for the SSL port.
+- `build-commo.sh`'s EXIT trap kills its own process group; a `bash
+  build-commo.sh > log` wrapper sees exit 143 even on success (the log ends
+  with `comms stack OK`). Pre-existing.
+
+## Follow-ups (G1 done)
+
+- OTS upstream: `auto_delete` per-EUD queues; silent drop on callsign
+  collision. Worth filing.
+- The `[commo-diag]` WARNING probes (patch 0001) are loud on every run; demote
+  or gate behind `MACTAK_COMMO_DIAG` once the stack has been quiet for a while.
+- A data-package importer (`--datapackage ZIP` → host, port, certs,
+  passwords from `preference.pref`) is the obvious UX step toward G2.

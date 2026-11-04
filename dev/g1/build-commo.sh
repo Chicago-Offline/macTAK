@@ -133,6 +133,7 @@ CORE_CXXFLAGS="-g -O2 -fPIC -std=c++17 -Wall -fstack-protector-all \
  -D__STDC_FORMAT_MACROS -DCURL_STATICLIB \
  -I../include -I$WORK/shim/include/libxml2 -I$WORK/shim/include -I$HB/include \
  -Wl,-rpath,$HB/opt/protobuf/lib -Wl,-rpath,$HB/opt/abseil/lib \
+ -L$WORK/shim/lib \
  -L$HB/lib -lcurl \
  -L$HB/opt/abseil/lib -L$HB/opt/protobuf/lib $ABSL_LIBS -lutf8_validity -lutf8_range \
  -Wno-deprecated-declarations -Wno-deprecated \
@@ -158,6 +159,9 @@ cp -R "$WORK/commo/jni/classes/com" "$WORK/commo/jni/"
 
 # --- JNI glue --------------------------------------------------------------
 log "building libcommoncommojni (jni/native TARGET=macos)"
+# macTAK shim: OpenSSL 3 legacy provider loader for RC2-40 data-package PKCS#12
+# (the Makefile compiles every *.cpp in jni/native and links libcrypto).
+cp "$G1/jni-extra/mactak_ssl.cpp" "$WORK/commo/jni/native/"
 JNI_CXXFLAGS="-g -O2 -fPIC -std=c++17 -Wall -Wno-unused \
  -D__STDC_LIMIT_MACROS -DCURL_STATICLIB -fstack-protector-all \
  -I$WORK/commo/core/include -I$WORK/shim/include \
@@ -193,6 +197,16 @@ PY
 log "canary 2/3: JNI exports"
 nm -gU "$OUT/libcommoncommojni.dylib" | grep 'Java_com_atakmap_commoncommo' >/dev/null \
   || die "libcommoncommojni.dylib is missing the commoncommo JNI exports"
+nm -gU "$OUT/libcommoncommojni.dylib" | grep 'Java_mactak_headless_NativeSsl_loadLegacyProvider' >/dev/null \
+  || die "libcommoncommojni.dylib is missing the macTAK OpenSSL legacy-provider shim (dev/g1/jni-extra)"
+# One OpenSSL runtime per process: the Makefile's link line puts CXXFLAGS'
+# -L dirs before -lssl -lcrypto, and $HB/lib/libcrypto.dylib follows whatever
+# openssl@N brew linked last. Both dylibs must resolve the shim's openssl@3,
+# or the legacy provider the shim loads lands in a libcrypto commo never calls.
+for lib in libcommoncommo libcommoncommojni; do
+  otool -L "$OUT/$lib.dylib" | grep 'openssl@3/lib/libcrypto' >/dev/null \
+    || die "$lib.dylib does not link openssl@3's libcrypto: $(otool -L "$OUT/$lib.dylib" | grep -i crypto | tr -s ' ')"
+done
 
 log "canary 3/3: JVM in-process Commo create"
 cat > "$WORK/canary/CommoLoadSmoke.java" <<'JAVA'

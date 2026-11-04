@@ -2,12 +2,15 @@
 """Hermetic CoT server for the headless round-trip smoke (stdlib only).
 
 Sends one minimal CoT <event> XML line to every connected TCP client every
-~2s; prints client lines prefixed 'cot-rx:'. Also relays each client line to
-the *other* connected clients, like a real TAK server: a server does not
+~2s; prints client events prefixed 'cot-rx:'. Also relays each client event
+to the *other* connected clients, like a real TAK server: a server does not
 reflect a client's own events back to it, so a two-client round-trip needs
-the relay. Relaying is byte-exact and newline-framed: each client gets its
-own accumulation buffer so an event split across recv() boundaries is
-forwarded once, whole, rather than as two malformed fragments. usage:
+the relay. Inbound framing is on the '</event>' end token, exactly as commo
+and TAK Server frame a CoT stream (commo writes '<?xml ...?>\n<event .../>'
+with no trailing newline, so newline framing would glue each event to the
+next one's prolog); each client gets its own accumulation buffer so an
+event split across recv() boundaries is forwarded once, whole. The prolog
+is dropped and the bare '<event>...</event>\n' is relayed. usage:
 fake-cot-server.py [PORT] (env PORT overrides; default 8087). Runs until
 SIGTERM.
 """
@@ -18,15 +21,17 @@ import socket
 import sys
 import time
 RUNNING, FMT = [True], "%Y-%m-%dT%H:%M:%S.%f"
-MAX_BUF = 1 << 20  # drop a peer's buffer if it sends 1 MiB with no newline
+END = b"</event>"
+MAX_BUF = 1 << 20  # drop a peer's buffer if it sends 1 MiB with no </event>
 
 
 def cot_line():
+    # No XML prolog: commo frames on '</event>' and leaves the trailing newline of the
+    # previous message in its buffer, and libxml2 rejects a prolog that isn't byte 0.
     now = datetime.datetime.now(datetime.timezone.utc)
     t = now.strftime(FMT)[:-3] + "Z"
     stale = (now + datetime.timedelta(seconds=30)).strftime(FMT)[:-3] + "Z"
-    return ("<?xml version='1.0' encoding='UTF-8'?>"
-            "<event version='2.0' uid='fake-cot-001' type='a-f-G-U-C'"
+    return ("<event version='2.0' uid='fake-cot-001' type='a-f-G-U-C'"
             " time='" + t + "' start='" + t + "' stale='" + stale + "' how='m-g'>"
             "<point lat='37.7749' lon='-122.4194' ce='10.0' le='10.0' hae='0.0'/>"
             "</event>\n")
@@ -86,14 +91,16 @@ def main():
                     print("fake-cot: oversized buffer, resyncing", flush=True)
                     del buf[:]
                 while True:
-                    nl = buf.find(b"\n")
-                    if nl < 0:  # partial event: keep it until the newline lands
+                    end = buf.find(END)
+                    if end < 0:  # partial event: keep it until the end token lands
                         break
-                    raw = bytes(buf[:nl])
-                    del buf[:nl + 1]
-                    if not raw.strip():
+                    raw = bytes(buf[:end + len(END)])
+                    del buf[:end + len(END)]
+                    start = raw.find(b"<event")
+                    if start < 0:
                         continue
-                    print("cot-rx: " + raw.decode("utf-8", "replace").strip(), flush=True)
+                    raw = raw[start:]  # drops the XML prolog and inter-event whitespace
+                    print("cot-rx: " + raw.decode("utf-8", "replace"), flush=True)
                     relay(clients, sock, raw + b"\n")
             else:
                 drop(clients, sock, "disconnected")

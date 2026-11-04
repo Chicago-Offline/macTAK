@@ -40,4 +40,4 @@ lint:
 	fi
 
 clean:
-	rm -rf dev/g1/native-dist dev/g1/build-commo
+	rm -rf dev/g1/native-dist dev/g1/build-commo dev/g1/headless/build

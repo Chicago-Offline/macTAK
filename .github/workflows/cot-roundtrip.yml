@@ -1,6 +1,8 @@
-# Hermetic CoT round-trip gate: builds the commoncommo stack and runs the
-# headless client against dev/g1/headless/fake-cot-server.py (no external
-# FreeTAKServer needed) — the PR tier for dev/g1/**.
+# Hermetic CoT round-trip gate: builds the engine AND the commoncommo stack
+# (atak-headless is one JVM with both in-process since G1.4 — received CoT
+# is persisted through the engine's DatabaseImpl JNI) and runs two headless
+# clients against dev/g1/headless/fake-cot-server.py (no external TAK server
+# needed) — the PR tier for dev/g1/**.
 
 name: CoT round-trip
 
@@ -24,7 +26,7 @@ jobs:
   cot-roundtrip:
     name: hermetic CoT round-trip (macOS arm64)
     runs-on: macos-26
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - name: Check out macTAK
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -38,12 +40,14 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Install comms dependencies (Homebrew)
-        # build-commo.sh preflight list; protoc ships with protobuf
+      - name: Install engine + comms dependencies (Homebrew)
+        # build-native.sh + build-commo.sh preflight lists; protoc ships with protobuf
         env:
           HOMEBREW_NO_AUTO_UPDATE: '1'
           HOMEBREW_NO_INSTALL_CLEANUP: '1'
-        run: brew install openssl@3 libxml2 protobuf libmicrohttpd curl
+        run: >
+          brew install cmake rsync proj geos gdal libspatialite minizip nlohmann-json laszip googletest
+          openssl@3 libxml2 protobuf libmicrohttpd curl
 
       - name: Set up Zulu 8 (arm64) — javah for the JNI glue + load canary
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
@@ -51,6 +55,9 @@ jobs:
           distribution: zulu
           java-version: '8'
           architecture: aarch64
+
+      - name: Build engine + canary (dev/g1/build-native.sh, verbatim)
+        run: bash dev/g1/build-native.sh
 
       - name: Build comms stack (dev/g1/build-commo.sh, verbatim)
         run: bash dev/g1/build-commo.sh
@@ -62,6 +69,9 @@ jobs:
           sleep 2
 
       - name: Headless client round-trip vs hermetic server (run.sh 15)
+        # Two clients, each persisting what it receives into its own tracks DB
+        # (engine DatabaseImpl JNI -> sqlite); run.sh asserts A's DB holds B's
+        # presence + marker and prints the exit demo (latest fix per uid).
         env:
           FTS_HOST: 127.0.0.1
           FTS_PORT: '8087'

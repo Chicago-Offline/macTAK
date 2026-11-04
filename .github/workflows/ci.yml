@@ -101,7 +101,11 @@ jobs:
         env:
           HOMEBREW_NO_AUTO_UPDATE: '1'
           HOMEBREW_NO_INSTALL_CLEANUP: '1'
-        run: brew install cmake rsync proj geos gdal libspatialite minizip nlohmann-json laszip googletest
+        # + the build-commo.sh preflight list: the layer canary below runs
+        # atak-headless, which is one JVM with both stacks since G1.4.
+        run: >
+          brew install cmake rsync proj geos gdal libspatialite minizip nlohmann-json laszip googletest
+          openssl@3 libxml2 protobuf libmicrohttpd curl
 
       - name: Set up Zulu 8 (arm64) for the JNI smoke canary
         # build-native.sh itself needs no JDK (jni.h is pinned at
@@ -116,6 +120,12 @@ jobs:
       - name: Build engine + canary (dev/g1/build-native.sh, verbatim)
         if: needs.changes.outputs.changed == 'true'
         run: bash dev/g1/build-native.sh
+
+      - name: Build comms stack (dev/g1/build-commo.sh, verbatim)
+        # atak-headless loads libcommoncommo(jni) alongside the engine; the
+        # commo-stack job below is the gate for this build, this is its consumer.
+        if: needs.changes.outputs.changed == 'true'
+        run: bash dev/g1/build-commo.sh
 
       - name: atak-headless offline layer open (GeoJSON/GPKG/KML/SHP via FeatureDataStore2)
         # G1 "offline map layer opens": native OGR provider parses the

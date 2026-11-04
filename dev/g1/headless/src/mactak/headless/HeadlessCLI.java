@@ -1,3 +1,5 @@
+package mactak.headless;
+
 import com.atakmap.commoncommo.Commo;
 import com.atakmap.commoncommo.CommoException;
 import com.atakmap.commoncommo.CommoLogger;
@@ -7,6 +9,9 @@ import com.atakmap.commoncommo.ContactPresenceListener;
 import com.atakmap.commoncommo.NetInterface;
 import com.atakmap.commoncommo.InterfaceStatusListener;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -15,29 +20,53 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
+ * atak-headless entry point: one JVM, both stacks. {@link #main} loads the
+ * engine ({@code libtakengine} + JNI glue) and comms ({@code libcommoncommo}
+ * + JNI glue) dylibs from {@code -Dmactak.native.dist} into this process,
+ * then dispatches: {@code --layer} → {@link LayerCLI} (G1.3), anything else
+ * → the CoT endpoint below.
+ *
  * G1.2 — headless CoT endpoint on the commoncommo JNI stack.
  *
- * Connects to a TAK server's plaintext CoT port (e.g. FreeTAKServer
- * tcp/8087) as a streaming (TCP client) interface, announces presence on a
+ * Connects to a TAK server's CoT port as a streaming (TCP client)
+ * interface — plaintext (e.g. FreeTAKServer tcp/8087, OpenTAKServer 8088)
+ * or, with {@code --cert} + {@code --ca} (PKCS#12, the two files in an ATAK
+ * data package; passwords from {@code MACTAK_CERT_PASS} /
+ * {@code MACTAK_CA_PASS}), SSL with a client certificate (OpenTAKServer
+ * 8089). Announces presence on a
  * short heartbeat once the interface comes up (the server only registers a
  * client after its first message — and commo only makes the interface
  * sendable after the interfaceUp listeners return, so sends never happen
  * inside the callback; see the sender thread in main), prints every
- * received CoT verbatim, and exits 0 after --duration seconds. Everything
- * the smoke script asserts on is printed as a single machine-greppable
- * "headless:" line:
+ * received CoT verbatim, and exits 0 after --duration seconds.
+ *
+ * G1.4 — every received CoT that parses as an {@code <event>} with a
+ * {@code <point>} is persisted through the engine's {@code DatabaseImpl}
+ * JNI into a sqlite tracks DB ({@code --db PATH}; a private temporary DB
+ * when omitted), and the newest fix per uid is printed on exit — the
+ * roadmap's "plots them in-memory" demo. Everything the smoke script
+ * asserts on is printed as a single machine-greppable "headless:" line:
  *
  *   headless: iface-up | iface-down
- *   headless: contact-added <uid>
- *   headless: cot-received <raw xml, one line>
+ *   headless: contact-added &lt;uid&gt;
+ *   headless: cot-received &lt;raw xml, one line&gt;
+ *   headless: cot-unparsed &lt;reason&gt;
  *   headless: presence-sent | presence-heartbeat n=N
- *   headless: marker-sent lat=<lat> lon=<lon>
- *   headless: summary received=N ifaceUpSeen=<b> presenceSent=N markerSent=N
+ *   headless: marker-sent lat=&lt;lat&gt; lon=&lt;lon&gt;
+ *   headless: summary received=N persisted=N ifaceUpSeen=&lt;b&gt; presenceSent=N markerSent=N
+ *   headless: track uid=&lt;uid&gt; type=&lt;t&gt; callsign=&lt;cs&gt; lat=&lt;lat&gt; lon=&lt;lon&gt; time=&lt;t&gt; fixes=N
+ *   headless: tracks uids=N fixes=N db=&lt;path|temporary&gt;
  *
  * Exit codes: 0 completed the run, 2 usage, 3 stack/connect failure,
  * 4 dead run: no CoT received or interface never came up.
  */
 public final class HeadlessCLI {
+
+    /** Desktop load order: core before its JNI glue, per stack (EngineLibrary's list). */
+    private static final String[] NATIVE_LIBS = {
+        "libtakengine.dylib", "libtakenginejni.dylib",
+        "libcommoncommo.dylib", "libcommoncommojni.dylib",
+    };
 
     private static final SimpleDateFormat COT_TIME = new SimpleDateFormat(
             "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
@@ -63,13 +92,35 @@ public final class HeadlessCLI {
     private static void usage(int code) {
         System.err.println(
                 "usage: atak-headless --connect host:port [--uid UID] [--callsign CS]\n" +
-                "                     [--duration SECONDS] [--send-marker LAT LON]");
+                "                     [--duration SECONDS] [--send-marker LAT LON] [--db PATH]\n" +
+                "                     [--cert CLIENT.p12 --ca TRUSTSTORE.p12]   (SSL; passwords via\n" +
+                "                      MACTAK_CERT_PASS / MACTAK_CA_PASS, default 'atakatak')\n" +
+                "       atak-headless --layer FILE [--layer FILE ...] [--layer-db DIR]\n" +
+                "                     [--expect-features N] [--quiet]");
         System.exit(code);
     }
 
     public static void main(String[] args) {
+        final String dist = System.getProperty("mactak.native.dist");
+        if (dist == null) {
+            System.err.println("mactak.native.dist not set — run via the atak-headless launcher");
+            System.exit(3);
+        }
+        try {
+            for (String lib : NATIVE_LIBS) System.load(dist + "/" + lib);
+        } catch (UnsatisfiedLinkError e) {
+            System.err.println("atak-headless: native load failed: " + e.getMessage());
+            System.exit(3);
+        }
+
+        if (args.length > 0 && "--layer".equals(args[0])) {
+            System.exit(LayerCLI.run(args));
+            return;
+        }
+
         String host = null, uid = "g1-headless-" + (System.nanoTime() % 1000000L),
-               callsign = "HEADLESS", markerLat = null, markerLon = null;
+               callsign = "HEADLESS", markerLat = null, markerLon = null, dbPath = null,
+               certPath = null, caPath = null;
         int port = -1, duration = 15;
 
         for (int i = 0; i < args.length; i++) {
@@ -96,26 +147,33 @@ public final class HeadlessCLI {
                     markerLat = args[++i];
                     markerLon = args[++i];
                     break;
+                case "--db":        if (i + 1 >= args.length) usage(2);
+                                    dbPath = args[++i]; break;
+                case "--cert":      if (i + 1 >= args.length) usage(2);
+                                    certPath = args[++i]; break;
+                case "--ca":        if (i + 1 >= args.length) usage(2);
+                                    caPath = args[++i]; break;
                 default: usage(2);
             }
         }
         if (host == null) usage(2);
-
-        final String dist = System.getProperty("atakheadless.dist");
-        if (dist == null) {
-            System.err.println("atakheadless.dist not set — run via the atak-headless launcher");
-            System.exit(3);
-        }
+        if ((certPath == null) != (caPath == null)) usage(2);   // SSL needs both
 
         final AtomicInteger received = new AtomicInteger();
+        final AtomicInteger persisted = new AtomicInteger();
         final AtomicInteger presenceSent = new AtomicInteger();
         final AtomicInteger markerSent = new AtomicInteger();
         final AtomicBoolean ifaceUpSeen = new AtomicBoolean(false);
         final AtomicBoolean done = new AtomicBoolean(false);
 
+        TrackStore tracks = null;
         try {
-            System.load(dist + "/libcommoncommo.dylib");
-            System.load(dist + "/libcommoncommojni.dylib");
+            // Engine side first: the tracks DB goes through DatabaseImpl's JNI
+            // (Java -> glue -> C++ Database2 -> sqlite), same path as the G1.1 smoke.
+            tracks = new TrackStore(dbPath);
+            final TrackStore fTracks = tracks;
+            System.out.println("headless: tracks-db " + (dbPath == null ? "temporary" : dbPath));
+
             Commo.initThirdpartyNativeLibraries();
 
             final Commo commo = new Commo(new Log(), uid, callsign);
@@ -165,14 +223,36 @@ public final class HeadlessCLI {
                     received.incrementAndGet();
                     System.out.println("headless: cot-received " + (cotMessage == null
                             ? "" : cotMessage.replaceAll("\\s+", " ").trim()));
+                    if (cotMessage == null || done.get()) return;
+                    try {
+                        final CotEvent e = CotEvent.parse(cotMessage);
+                        // TAK server pings (t-x-c-t, "<uid>-ping") are not tracks; ATAK drops them too.
+                        if (e.type.startsWith("t-x-c-t")) return;
+                        fTracks.record(e, System.currentTimeMillis());
+                        persisted.incrementAndGet();
+                    } catch (Exception e) {
+                        System.out.println("headless: cot-unparsed " + e.getMessage());
+                    }
                 }
             });
 
             System.out.println("headless: connecting " + host + ":" + port
+                    + (certPath == null ? "" : " ssl cert=" + new File(certPath).getName())
                     + " uid=" + uid + " callsign=" + callsign);
+            // A client cert switches commo's streaming interface to SSL. Data-package
+            // PKCS#12 is RC2-40: OpenSSL 3 needs its legacy provider (NativeSsl shim).
+            final String certPass = env("MACTAK_CERT_PASS", "atakatak");
+            final String caPass = env("MACTAK_CA_PASS", certPass);
+            final byte[] clientCert = certPath == null ? null : readFile(certPath);
+            final byte[] caCert = caPath == null ? null : readFile(caPath);
+            if (clientCert != null && !NativeSsl.loadLegacyProvider())
+                System.err.println("headless: OpenSSL legacy provider unavailable; RC2-40 PKCS#12 will fail");
             commo.addStreamingInterface(host, port,
                     new CoTMessageType[] { CoTMessageType.SITUATIONAL_AWARENESS },
-                    null, null, null, null, null, null);
+                    clientCert, caCert,
+                    clientCert == null ? null : certPass,
+                    caCert == null ? null : caPass,
+                    null, null);
 
             long deadline = System.currentTimeMillis() + duration * 1000L;
 
@@ -233,9 +313,14 @@ public final class HeadlessCLI {
                 commo.shutdown();
 
             System.out.println("headless: summary received=" + received.get()
+                    + " persisted=" + persisted.get()
                     + " ifaceUpSeen=" + ifaceUpSeen.get()
                     + " presenceSent=" + presenceSent.get()
                     + " markerSent=" + markerSent.get());
+            // The exit demo: what the tracks DB holds, latest fix per uid.
+            System.out.print(tracks.summary(dbPath == null ? "temporary" : dbPath));
+            tracks.close();
+            tracks = null;
             System.exit(received.get() > 0 && ifaceUpSeen.get() ? 0 : 4);
         } catch (CommoException e) {
             System.err.println("commo[ERROR] stack failure: " + e);
@@ -243,24 +328,45 @@ public final class HeadlessCLI {
         } catch (Throwable t) {
             System.err.println("commo[ERROR] fatal: " + t);
             System.exit(3);
+        } finally {
+            if (tracks != null) tracks.close();
         }
     }
 
+    private static byte[] readFile(String path) throws IOException {
+        return Files.readAllBytes(new File(path).toPath());
+    }
+
+    private static String env(String name, String dflt) {
+        final String v = System.getenv(name);
+        return (v == null || v.isEmpty()) ? dflt : v;
+    }
+
+    /**
+     * Self-SA as ATAK sends it (a-f-G-U-C + contact/__group/takv/uid): this is
+     * what registers the EUD on a TAK server — OpenTAKServer only starts the
+     * per-client fan-out consumer once a parseable self-SA with uid, callsign
+     * and group has arrived; a bare t-x-a-t-a-k ping does not register.
+     */
     private static String presence(String uid, String callsign) {
         String t = now(0), stale = now(30000L);
-        return "<event version='2.0' uid='" + uid + "' type='t-x-a-t-a-k'"
-                + " time='" + t + "' start='" + t + "' stale='" + t + "' how='m-g'>"
+        return "<event version='2.0' uid='" + uid + "' type='a-f-G-U-C'"
+                + " time='" + t + "' start='" + t + "' stale='" + stale + "' how='m-g'>"
                 + "<point lat='0.0' lon='0.0' ce='9999999' le='9999999' hae='0.0'/>"
                 + "<detail>"
-                + "<contact endpoint='tcp://-.-.-.-:-' callsign='" + callsign + "'/>"
                 + "<takv os='macOS' device='macTAK' platform='atak-headless' version='0.1.0'/>"
+                + "<contact endpoint='*:-1:stcp' callsign='" + callsign + "'/>"
+                + "<uid Droid='" + callsign + "'/>"
+                + "<__group name='Cyan' role='Team Member'/>"
+                + "<status battery='100'/>"
+                + "<track course='0.0' speed='0.0'/>"
                 + "</detail></event>";
     }
 
     private static String marker(String uid, String callsign, String lat, String lon) {
         String t = now(0), stale = now(120000L);
         return "<event version='2.0' uid='" + uid + "-m1' type='a-f-G-U-C'"
-                + " time='" + t + "' start='" + t + "' stale='" + t + "' how='m-g'>"
+                + " time='" + t + "' start='" + t + "' stale='" + stale + "' how='m-g'>"
                 + "<point lat='" + lat + "' lon='" + lon + "' ce='10.0' le='10.0' hae='0.0'/>"
                 + "<detail>"
                 + "<contact callsign='" + callsign + "-M1'/>"

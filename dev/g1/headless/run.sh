@@ -17,6 +17,7 @@
 #        plaintext; OpenTAKServer uses 8088). FTS_HOST/FTS_PORT still honoured.
 #        e.g. FreeTAKServer: docker run -d --name freetakserver --network host \
 #                                vigsecdrone/freetakserver:latest
+# CI: also runs hermetically against dev/g1/headless/fake-cot-server.py (.github/workflows/cot-roundtrip.yml)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

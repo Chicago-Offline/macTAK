@@ -140,7 +140,14 @@ by path, gets `@loader_path` in its rpath, and `native-dist/` receives
   (G1.3) through `GLMapView.setBaseMap` / layer renderers → needs
   `android.graphics.Bitmap`/`BitmapFactory` runtime (CoreGraphics).
 - Render goldens in CI (`ci-qa.md` tier 2): the pbuffer path is exactly the
-  offscreen harness that plan assumed; a self-hosted macOS runner can stage
-  ANGLE. Hosted CI stays on `MACTAK_GLES=stub`.
+  offscreen harness that plan assumed, and hosted `macos-26` already runs
+  it on ANGLE/Metal (Apple Paravirtual device, ~170 ms/frame vs ~3–5 ms on
+  an M-series — budget frame counts accordingly). A self-hosted runner is
+  only needed for speed, not for GL.
+- `GLMegaTexture::shareTile` has `other,shareWith = this;` (comma operator:
+  sets `this->shareWith = this`, never `other.shareWith`), so after the
+  first share every call from that megatexture returns `TE_IllegalState`.
+  Latent upstream bug; fix in the megatexture patch when G2.2 exercises
+  front/back tile sharing with real content.
 - Engine jar for a `macos` host source set (retire the shadow classes).
 - Build ANGLE from source at a pinned commit (retire the Electron source).

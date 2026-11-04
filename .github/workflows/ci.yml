@@ -199,6 +199,7 @@ jobs:
         run: bash dev/g1/build-native.sh
 
       - name: Build comms stack (the single-JVM launcher needs both)
+        id: build-commo
         if: needs.changes.outputs.changed == 'true'
         run: bash dev/g1/build-commo.sh
 
@@ -209,7 +210,8 @@ jobs:
         run: bash dev/g2/render/run.sh --frames 10 --out dev/g2/build/render-smoke.ppm
 
       - name: Offline layer canary on the ANGLE-linked engine
-        if: needs.changes.outputs.changed == 'true'
+        # both canaries report every run; only a failed build skips this one
+        if: ${{ !cancelled() && steps.build-commo.outcome == 'success' }}
         run: bash dev/g1/headless/test/layer.sh
 
       - name: Upload render artifacts

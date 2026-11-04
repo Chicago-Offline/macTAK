@@ -16,7 +16,7 @@ CLI="$HERE/../atak-headless"
 FIXTURE="$HERE/fixtures/sf-landmarks.geojson"
 FIXTURE_FEATURES=8
 WORK="$(mktemp -d)"
-# shellcheck disable=SC2329  # invoked via trap
+# shellcheck disable=SC2317,SC2329  # invoked via trap (SC2317 on shellcheck < 0.10)
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
 

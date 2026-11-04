@@ -2,8 +2,11 @@
 """Hermetic CoT server for the headless round-trip smoke (stdlib only).
 
 Sends one minimal CoT <event> XML line to every connected TCP client every
-~2s; prints client lines prefixed 'cot-rx:'. usage: fake-cot-server.py
-[PORT] (env PORT overrides; default 8087). Runs until SIGTERM.
+~2s; prints client lines prefixed 'cot-rx:'. Also relays each client line to
+the *other* connected clients, like a real TAK server: a server does not
+reflect a client's own events back to it, so a two-client round-trip needs
+the relay. usage: fake-cot-server.py [PORT] (env PORT overrides; default
+8087). Runs until SIGTERM.
 """
 import datetime
 import os
@@ -38,6 +41,17 @@ def drop(clients, sock, why):
     print("fake-cot: client %s" % why, flush=True)
 
 
+def relay(clients, sender, payload):
+    """Forward a client line to every other client (never back to sender)."""
+    for peer in list(clients):
+        if peer is sender:
+            continue
+        try:
+            peer.sendall(payload)
+        except OSError:
+            drop(clients, peer, "send-failed")
+
+
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", "8087"))
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -61,7 +75,11 @@ def main():
                 continue
             if data:
                 for line in data.decode("utf-8", "replace").splitlines():
-                    print("cot-rx: " + line.strip(), flush=True)
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    print("cot-rx: " + stripped, flush=True)
+                    relay(clients, sock, (stripped + "\n").encode("utf-8"))
             else:
                 drop(clients, sock, "disconnected")
         try:  # accept new clients

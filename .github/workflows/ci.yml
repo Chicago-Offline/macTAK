@@ -5,6 +5,19 @@
 # the same pinned commit the local build uses. dev/g1/build-native.sh runs
 # verbatim — one canonical build path, no CI-specific forks.
 
+# Runs on every pull_request (no paths filter) so the main ruleset's required
+# CI checks — "native engine (macOS arm64)", "JVM tests (Zulu 8, macOS arm64)",
+# "lint (shell + workflows)" — always report. With paths-ignore, docs-only PRs
+# never trigger this workflow and those required checks are stuck at
+# "Expected" forever — the same gap the docs workflow closed in PR #12
+# (see docs.yml's header comment).
+#
+# The heavy steps no-op when a PR has no CI-relevant changes: the `changes`
+# job diffs the PR against its base and the steps run only on a match.
+# This must stay at step level — a job-level `if` skips the whole job,
+# which reports "skipped", and a skipped check does not satisfy a required
+# check (same trap as above, one level down).
+
 name: CI
 
 on:
@@ -15,12 +28,8 @@ on:
       - 'docs/**'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-  # Manual escape hatch: the main ruleset requires this workflow's check names
-  # on every PR, but paths-ignore above skips docs-only PRs — dispatch it
-  # (gh workflow run CI --ref <branch>) to fill the required checks on those.
+  # Manual runs stay available for spot checks; no longer needed to fill
+  # required checks now that pull_request triggers unconditionally.
   workflow_dispatch:
 
 permissions:
@@ -31,8 +40,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: detect CI changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - name: Check out macTAK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Diff against the PR base
+        id: diff
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          # Non-PR runs (push with matching paths, dispatch): always run the gates.
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags origin "refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          # Three-dot diff = PR's own changes. dev/ covers the engine, comms and
+          # JVM gates and their scripts; .github/workflows covers this file and
+          # the pinned upstream commit; Makefile wraps the build entry points.
+          # A diff failure fails the job loudly rather than silently skipping.
+          changed=$(git diff --name-only "origin/${BASE_REF}...HEAD" -- 'dev' '.github/workflows' 'Makefile')
+          if [ -n "$changed" ]; then
+            printf '%s\n' "$changed"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No CI-relevant changes vs ${BASE_REF} — heavy steps will skip"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
   native-engine:
     name: native engine (macOS arm64)
+    needs: changes
     runs-on: macos-26 # Xcode 26 toolchain — matches the verified local build; Xcode 15 (macos-14) fails on old libc++ pair constraints
     timeout-minutes: 60
     steps:
@@ -49,6 +97,7 @@ jobs:
           fetch-depth: 1
 
       - name: Install engine dependencies (Homebrew)
+        if: needs.changes.outputs.changed == 'true'
         env:
           HOMEBREW_NO_AUTO_UPDATE: '1'
           HOMEBREW_NO_INSTALL_CLEANUP: '1'
@@ -65,16 +114,19 @@ jobs:
           architecture: aarch64
 
       - name: Build engine + canary (dev/g1/build-native.sh, verbatim)
+        if: needs.changes.outputs.changed == 'true'
         run: bash dev/g1/build-native.sh
 
       - name: atak-headless offline layer open (GeoJSON/GPKG/KML/SHP via FeatureDataStore2)
         # G1 "offline map layer opens": native OGR provider parses the
         # fixture (+ ogr2ogr-derived GPKG/KML/SHP), the persistent feature
         # data store holds it, FeatureDataStore2 cursors read it back.
+        if: needs.changes.outputs.changed == 'true'
         run: bash dev/g1/headless/test/layer.sh
 
       - name: Upload engine artifacts
-        if: always()
+        # Guarded: if-no-files-found is error, which would fail a no-op run.
+        if: always() && needs.changes.outputs.changed == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-engine-macos-arm64
@@ -87,6 +139,7 @@ jobs:
 
   commo-stack:
     name: comms stack (macOS arm64)
+    needs: changes
     runs-on: macos-26 # Xcode 26 toolchain — matches the verified local build
     timeout-minutes: 30
     steps:
@@ -104,6 +157,7 @@ jobs:
 
       - name: Install comms dependencies (Homebrew)
         # build-commo.sh preflight list; protoc ships with protobuf
+        if: needs.changes.outputs.changed == 'true'
         env:
           HOMEBREW_NO_AUTO_UPDATE: '1'
           HOMEBREW_NO_INSTALL_CLEANUP: '1'
@@ -117,10 +171,12 @@ jobs:
           architecture: aarch64
 
       - name: Build comms stack + canaries (dev/g1/build-commo.sh, verbatim)
+        if: needs.changes.outputs.changed == 'true'
         run: bash dev/g1/build-commo.sh
 
       - name: Upload comms artifacts
-        if: always()
+        # Guarded: if-no-files-found is error, which would fail a no-op run.
+        if: always() && needs.changes.outputs.changed == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: commo-stack-macos-arm64
@@ -132,6 +188,7 @@ jobs:
 
   jvm-tests:
     name: JVM tests (Zulu 8, macOS arm64)
+    needs: changes
     runs-on: macos-26 # matches the locally verified macOS/Zulu 8 arm64 environment
     timeout-minutes: 40
     steps:
@@ -159,22 +216,26 @@ jobs:
         # gov.tak.support:android-port is TAK-artifactory-only; G0 built a
         # compile-only transplant (see dev/spike/g0/NOTES.md §3). CI installs
         # the committed jar so the G0 patch's mavenLocal repo resolves it.
+        if: needs.changes.outputs.changed == 'true'
         run: mvn -B org.apache.maven.plugins:maven-install-plugin:3.1.2:install-file
           -Dfile=dev/spike/g0/transplants/android-port-3.1.0.jar
           -DpomFile=dev/spike/g0/transplants/android-port-3.1.0.pom
 
       - name: Apply G0 public-source build patch
+        if: needs.changes.outputs.changed == 'true'
         run: patch -d src -p1 --forward < dev/spike/g0/patches/gradle-public-source-build.patch
 
       - name: Apply G0 shared-test patch (commons-math3 + runtime-stub test exclusion)
+        if: needs.changes.outputs.changed == 'true'
         run: patch -d src -p1 --forward < dev/spike/g0/patches/gradle-shared-test-deps.patch
 
       - name: Kernel tests + publishToMavenLocal
+        if: needs.changes.outputs.changed == 'true'
         working-directory: src/takkernel
         run: ./gradlew --no-daemon :shared:test :port:test publishToMavenLocal
 
       - name: Upload test reports
-        if: always()
+        if: always() && needs.changes.outputs.changed == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: jvm-test-reports
@@ -188,6 +249,7 @@ jobs:
 
   lint:
     name: lint (shell + workflows)
+    needs: changes
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -198,6 +260,7 @@ jobs:
         uses: rhysd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
 
       - name: shellcheck + bash -n (dev/**/*.sh)
+        if: needs.changes.outputs.changed == 'true'
         run: |
           set -euo pipefail
           shopt -s globstar nullglob

@@ -1,0 +1,299 @@
+// macTAK addition to the JNI glue (built into libtakenginejni.dylib by
+// dev/g1/build-native.sh). G2: an EGL render context for the engine on macOS,
+// backed by ANGLE (EGL 1.5 + GL ES 3 on Metal). This is the piece the
+// upstream macOS branch leaves to the host — the engine's C++ never touches
+// EGL — and the JVM-side `mactak.render.EglRenderContext` drives it.
+//
+// EGL/GLES are resolved with dlopen/dlsym by path (not linked) so this TU
+// also builds in MACTAK_GLES=stub mode, where no EGL exists; init() simply
+// fails there. The GLES library passed in MUST be the same file the engine
+// was linked against (@rpath/libGLESv2.dylib staged in native-dist) so that
+// the context created here is the one the engine's GL calls land in.
+//
+// Single pbuffer, single context, no sharing: enough for offscreen frames.
+// Window surfaces (CAMetalLayer via EGL_ANGLE_metal_texture_client_buffer
+// or eglCreateWindowSurface on a CALayer) are the G2.2 step.
+#include <jni.h>
+
+#include <dlfcn.h>
+#include <execinfo.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GLES3/gl3.h>
+#include <GLES2/gl2ext.h>
+
+// ANGLE platform enums; the pinned Khronos registry predates the Metal one.
+#ifndef EGL_PLATFORM_ANGLE_ANGLE
+#define EGL_PLATFORM_ANGLE_ANGLE 0x3202
+#endif
+#ifndef EGL_PLATFORM_ANGLE_TYPE_ANGLE
+#define EGL_PLATFORM_ANGLE_TYPE_ANGLE 0x3203
+#endif
+#ifndef EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE
+#define EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE 0x3489
+#endif
+
+namespace {
+    struct Egl {
+        void *eglLib = nullptr;
+        void *glesLib = nullptr;
+
+        EGLDisplay (*GetDisplay)(EGLNativeDisplayType) = nullptr;
+        EGLBoolean (*Initialize)(EGLDisplay, EGLint *, EGLint *) = nullptr;
+        EGLBoolean (*Terminate)(EGLDisplay) = nullptr;
+        EGLBoolean (*ChooseConfig)(EGLDisplay, const EGLint *, EGLConfig *, EGLint, EGLint *) = nullptr;
+        EGLSurface (*CreatePbufferSurface)(EGLDisplay, EGLConfig, const EGLint *) = nullptr;
+        EGLBoolean (*DestroySurface)(EGLDisplay, EGLSurface) = nullptr;
+        EGLBoolean (*BindAPI)(EGLenum) = nullptr;
+        EGLContext (*CreateContext)(EGLDisplay, EGLConfig, EGLContext, const EGLint *) = nullptr;
+        EGLBoolean (*DestroyContext)(EGLDisplay, EGLContext) = nullptr;
+        EGLBoolean (*MakeCurrent)(EGLDisplay, EGLSurface, EGLSurface, EGLContext) = nullptr;
+        EGLContext (*GetCurrentContext)(void) = nullptr;
+        EGLint (*GetError)(void) = nullptr;
+        const char *(*QueryString)(EGLDisplay, EGLint) = nullptr;
+        void *(*GetProcAddress)(const char *) = nullptr;
+
+        void (*glFinish_)(void) = nullptr;
+        GLenum (*glGetError_)(void) = nullptr;
+        const GLubyte *(*glGetString_)(GLenum) = nullptr;
+        void (*glReadPixels_)(GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void *) = nullptr;
+        void (*glClearColor_)(GLfloat, GLfloat, GLfloat, GLfloat) = nullptr;
+        void (*glClear_)(GLbitfield) = nullptr;
+        void (*glReadBuffer_)(GLenum) = nullptr;
+
+        EGLDisplay dpy = EGL_NO_DISPLAY;
+        EGLSurface surf = EGL_NO_SURFACE;
+        EGLContext ctx = EGL_NO_CONTEXT;
+        int width = 0, height = 0;
+        char backend[16] = "none";
+        char lastError[256] = "";
+    };
+
+    Egl g;
+
+    void setError(const char *what) {
+        std::snprintf(g.lastError, sizeof g.lastError, "%s (eglError=0x%04x)", what,
+                      g.GetError ? (unsigned)g.GetError() : 0u);
+    }
+
+    template<class F> bool sym(void *lib, const char *name, F &out) {
+        out = reinterpret_cast<F>(dlsym(lib, name));
+        if (!out) {
+            std::snprintf(g.lastError, sizeof g.lastError, "dlsym(%s) failed", name);
+            return false;
+        }
+        return true;
+    }
+
+    bool loadSymbols() {
+        return sym(g.eglLib, "eglGetDisplay", g.GetDisplay)
+            && sym(g.eglLib, "eglInitialize", g.Initialize)
+            && sym(g.eglLib, "eglTerminate", g.Terminate)
+            && sym(g.eglLib, "eglChooseConfig", g.ChooseConfig)
+            && sym(g.eglLib, "eglCreatePbufferSurface", g.CreatePbufferSurface)
+            && sym(g.eglLib, "eglDestroySurface", g.DestroySurface)
+            && sym(g.eglLib, "eglBindAPI", g.BindAPI)
+            && sym(g.eglLib, "eglCreateContext", g.CreateContext)
+            && sym(g.eglLib, "eglDestroyContext", g.DestroyContext)
+            && sym(g.eglLib, "eglMakeCurrent", g.MakeCurrent)
+            && sym(g.eglLib, "eglGetCurrentContext", g.GetCurrentContext)
+            && sym(g.eglLib, "eglGetError", g.GetError)
+            && sym(g.eglLib, "eglQueryString", g.QueryString)
+            && sym(g.eglLib, "eglGetProcAddress", g.GetProcAddress)
+            && sym(g.glesLib, "glFinish", g.glFinish_)
+            && sym(g.glesLib, "glGetError", g.glGetError_)
+            && sym(g.glesLib, "glGetString", g.glGetString_)
+            && sym(g.glesLib, "glReadPixels", g.glReadPixels_)
+            && sym(g.glesLib, "glClearColor", g.glClearColor_)
+            && sym(g.glesLib, "glClear", g.glClear_)
+            && sym(g.glesLib, "glReadBuffer", g.glReadBuffer_);
+    }
+
+    void teardown() {
+        if (g.dpy != EGL_NO_DISPLAY) {
+            if (g.MakeCurrent) g.MakeCurrent(g.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            if (g.ctx != EGL_NO_CONTEXT && g.DestroyContext) g.DestroyContext(g.dpy, g.ctx);
+            if (g.surf != EGL_NO_SURFACE && g.DestroySurface) g.DestroySurface(g.dpy, g.surf);
+            if (g.Terminate) g.Terminate(g.dpy);
+        }
+        g.dpy = EGL_NO_DISPLAY; g.surf = EGL_NO_SURFACE; g.ctx = EGL_NO_CONTEXT;
+        // The dylibs stay loaded: the engine is linked against libGLESv2 anyway.
+    }
+
+    jstring str(JNIEnv *env, const char *s) { return env->NewStringUTF(s ? s : ""); }
+
+    void GL_APIENTRY debugCallback(GLenum source, GLenum type, GLuint id, GLenum severity,
+                                   GLsizei, const GLchar *message, const void *)
+    {
+        if (type == GL_DEBUG_TYPE_PERFORMANCE_KHR || type == GL_DEBUG_TYPE_OTHER_KHR) return;
+        std::fprintf(stderr, "mactak_egl[GL_KHR_debug] src=0x%x type=0x%x id=%u sev=0x%x: %s\n",
+                     source, type, id, severity, message ? message : "");
+        // MACTAK_GL_DEBUG=2: native backtrace for the first few errors
+        static int traced = 0;
+        const char *v = std::getenv("MACTAK_GL_DEBUG");
+        if (type == GL_DEBUG_TYPE_ERROR_KHR && v && std::atoi(v) >= 2 && traced < 6) {
+            ++traced;
+            void *frames[32];
+            int n = backtrace(frames, 32);
+            backtrace_symbols_fd(frames, n, 2);
+        }
+    }
+
+    // MACTAK_GL_DEBUG=1: debug context + GL_KHR_debug callback (names the
+    // call that raised a GL error; ANGLE's messages are specific).
+    bool debugRequested() {
+        const char *v = std::getenv("MACTAK_GL_DEBUG");
+        return v && *v && std::strcmp(v, "0") != 0;
+    }
+
+    void installDebugCallback() {
+        auto enable = reinterpret_cast<void (*)(GLenum)>(dlsym(g.glesLib, "glEnable"));
+        auto cb = reinterpret_cast<PFNGLDEBUGMESSAGECALLBACKKHRPROC>(g.GetProcAddress("glDebugMessageCallbackKHR"));
+        auto ctl = reinterpret_cast<PFNGLDEBUGMESSAGECONTROLKHRPROC>(g.GetProcAddress("glDebugMessageControlKHR"));
+        if (!enable || !cb || !ctl) { std::fprintf(stderr, "mactak_egl: GL_KHR_debug unavailable\n"); return; }
+        enable(GL_DEBUG_OUTPUT_KHR);
+        enable(GL_DEBUG_OUTPUT_SYNCHRONOUS_KHR);
+        ctl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, GL_TRUE);
+        cb(debugCallback, nullptr);
+    }
+}
+
+extern "C" {
+
+JNIEXPORT jboolean JNICALL Java_mactak_render_NativeEgl_init
+  (JNIEnv *env, jclass, jstring jeglPath, jstring jglesPath, jint width, jint height)
+{
+    if (g.dpy != EGL_NO_DISPLAY) { setError("already initialized"); return JNI_FALSE; }
+    if (!jeglPath || !jglesPath || width <= 0 || height <= 0) { setError("bad arguments"); return JNI_FALSE; }
+
+    const char *eglPath = env->GetStringUTFChars(jeglPath, nullptr);
+    const char *glesPath = env->GetStringUTFChars(jglesPath, nullptr);
+    // RTLD_GLOBAL so a later dyld resolution of @rpath/libGLESv2 shares this image.
+    g.glesLib = dlopen(glesPath, RTLD_NOW | RTLD_GLOBAL);
+    g.eglLib = dlopen(eglPath, RTLD_NOW | RTLD_GLOBAL);
+    const bool opened = g.glesLib && g.eglLib;
+    if (!opened)
+        std::snprintf(g.lastError, sizeof g.lastError, "dlopen failed: %s", dlerror());
+    env->ReleaseStringUTFChars(jeglPath, eglPath);
+    env->ReleaseStringUTFChars(jglesPath, glesPath);
+    if (!opened || !loadSymbols()) return JNI_FALSE;
+
+    // Metal platform first (ANGLE's default on macOS is also Metal, but be explicit).
+    auto getPlatformDisplay = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(g.GetProcAddress("eglGetPlatformDisplayEXT"));
+    if (getPlatformDisplay) {
+        const EGLint attrs[] = { EGL_PLATFORM_ANGLE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE, EGL_NONE };
+        g.dpy = getPlatformDisplay(EGL_PLATFORM_ANGLE_ANGLE, (void *)EGL_DEFAULT_DISPLAY, attrs);
+        std::strncpy(g.backend, "metal", sizeof g.backend);
+    }
+    if (g.dpy == EGL_NO_DISPLAY) {
+        g.dpy = g.GetDisplay(EGL_DEFAULT_DISPLAY);
+        std::strncpy(g.backend, "default", sizeof g.backend);
+    }
+    if (g.dpy == EGL_NO_DISPLAY) { setError("no EGL display"); return JNI_FALSE; }
+
+    EGLint major = 0, minor = 0;
+    if (!g.Initialize(g.dpy, &major, &minor)) { setError("eglInitialize"); g.dpy = EGL_NO_DISPLAY; return JNI_FALSE; }
+
+    // Engine needs depth + stencil (GLGlobe clears all three buffers).
+    const EGLint cfgAttrs[] = {
+        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
+        EGL_DEPTH_SIZE, 24, EGL_STENCIL_SIZE, 8,
+        EGL_NONE
+    };
+    EGLConfig cfg; EGLint n = 0;
+    if (!g.ChooseConfig(g.dpy, cfgAttrs, &cfg, 1, &n) || n < 1) { setError("eglChooseConfig"); teardown(); return JNI_FALSE; }
+
+    const EGLint pbAttrs[] = { EGL_WIDTH, width, EGL_HEIGHT, height, EGL_NONE };
+    g.surf = g.CreatePbufferSurface(g.dpy, cfg, pbAttrs);
+    if (g.surf == EGL_NO_SURFACE) { setError("eglCreatePbufferSurface"); teardown(); return JNI_FALSE; }
+
+    g.BindAPI(EGL_OPENGL_ES_API);
+    const bool dbg = debugRequested();
+    const EGLint ctxAttrs[] = { EGL_CONTEXT_CLIENT_VERSION, 3,
+                                EGL_CONTEXT_OPENGL_DEBUG, dbg ? EGL_TRUE : EGL_FALSE, EGL_NONE };
+    g.ctx = g.CreateContext(g.dpy, cfg, EGL_NO_CONTEXT, ctxAttrs);
+    if (g.ctx == EGL_NO_CONTEXT) { setError("eglCreateContext(ES3)"); teardown(); return JNI_FALSE; }
+
+    g.width = width; g.height = height;
+    g.lastError[0] = '\0';
+    if (dbg && g.MakeCurrent(g.dpy, g.surf, g.surf, g.ctx)) {
+        installDebugCallback();
+        g.MakeCurrent(g.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    }
+    return JNI_TRUE;
+}
+
+JNIEXPORT jboolean JNICALL Java_mactak_render_NativeEgl_makeCurrent(JNIEnv *, jclass)
+{
+    if (g.dpy == EGL_NO_DISPLAY) return JNI_FALSE;
+    if (!g.MakeCurrent(g.dpy, g.surf, g.surf, g.ctx)) { setError("eglMakeCurrent"); return JNI_FALSE; }
+    return JNI_TRUE;
+}
+
+JNIEXPORT jboolean JNICALL Java_mactak_render_NativeEgl_release(JNIEnv *, jclass)
+{
+    if (g.dpy == EGL_NO_DISPLAY) return JNI_FALSE;
+    return g.MakeCurrent(g.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_mactak_render_NativeEgl_isCurrent(JNIEnv *, jclass)
+{
+    return (g.ctx != EGL_NO_CONTEXT && g.GetCurrentContext() == g.ctx) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL Java_mactak_render_NativeEgl_finish(JNIEnv *, jclass)
+{
+    if (g.glFinish_) g.glFinish_();
+}
+
+JNIEXPORT jint JNICALL Java_mactak_render_NativeEgl_getGlError(JNIEnv *, jclass)
+{
+    return g.glGetError_ ? (jint)g.glGetError_() : -1;
+}
+
+// Pre-fill the colour buffer so a frame can be told apart from "nothing drew".
+JNIEXPORT void JNICALL Java_mactak_render_NativeEgl_fill
+  (JNIEnv *, jclass, jfloat r, jfloat gr, jfloat b, jfloat a)
+{
+    if (!g.glClearColor_) return;
+    g.glClearColor_(r, gr, b, a);
+    g.glClear_(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+}
+
+// RGBA8, bottom-up (GL order), into a direct ByteBuffer of >= w*h*4 bytes.
+JNIEXPORT jboolean JNICALL Java_mactak_render_NativeEgl_readPixels
+  (JNIEnv *env, jclass, jobject jbuf)
+{
+    if (g.dpy == EGL_NO_DISPLAY || !jbuf) return JNI_FALSE;
+    void *dst = env->GetDirectBufferAddress(jbuf);
+    const jlong cap = env->GetDirectBufferCapacity(jbuf);
+    if (!dst || cap < (jlong)g.width * g.height * 4) { setError("readPixels: buffer too small / not direct"); return JNI_FALSE; }
+    g.glReadBuffer_(GL_BACK);
+    g.glReadPixels_(0, 0, g.width, g.height, GL_RGBA, GL_UNSIGNED_BYTE, dst);
+    return g.glGetError_() == GL_NO_ERROR ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jstring JNICALL Java_mactak_render_NativeEgl_getString(JNIEnv *env, jclass, jint which)
+{
+    switch (which) {
+        case 0: return str(env, g.backend);
+        case 1: return str(env, g.dpy != EGL_NO_DISPLAY ? g.QueryString(g.dpy, EGL_VERSION) : "");
+        case 2: return str(env, g.glGetString_ ? (const char *)g.glGetString_(GL_RENDERER) : "");
+        case 3: return str(env, g.glGetString_ ? (const char *)g.glGetString_(GL_VERSION) : "");
+        case 4: return str(env, g.lastError);
+        default: return str(env, "");
+    }
+}
+
+JNIEXPORT void JNICALL Java_mactak_render_NativeEgl_destroy(JNIEnv *, jclass)
+{
+    teardown();
+}
+
+} // extern "C"

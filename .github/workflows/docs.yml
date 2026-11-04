@@ -1,4 +1,15 @@
 # Tier 0 per docs/ci-qa.md: markdown lint + link check for every *.md.
+#
+# Runs on every pull_request (no paths filter) so the main ruleset's required
+# "markdownlint" check always reports. With a paths filter, docs-less PRs
+# never trigger this workflow and the required check is stuck at "Expected"
+# forever — that gap is what the workflow_dispatch escape hatch papered over.
+#
+# The lint steps no-op when a PR has no docs changes: the `changes` job
+# diffs the PR against its base and the lint steps run only on a match.
+# This must stay at step level — a job-level `if` skips the whole job,
+# which reports "skipped", and a skipped check does not satisfy a required
+# check (same trap as above, one level down).
 
 name: Docs
 
@@ -11,14 +22,8 @@ on:
       - '.github/workflows/docs.yml'
   pull_request:
     branches: [main]
-    paths:
-      - '**.md'
-      - '.markdownlint-cli2.jsonc'
-      - '.github/workflows/docs.yml'
-  # Manual escape hatch: the main ruleset requires the markdownlint check on
-  # every PR, but the paths filters above skip PRs with no docs changes —
-  # dispatch it (gh workflow run docs.yml --ref <branch>) to fill the
-  # required check on those.
+  # Manual runs stay available for spot checks; no longer needed to fill
+  # required checks now that pull_request triggers unconditionally.
   workflow_dispatch:
 
 permissions:
@@ -29,8 +34,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: detect docs changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - name: Check out macTAK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Diff against the PR base
+        id: diff
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          # Non-PR runs (push with matching paths, dispatch): always lint.
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags origin "refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          # Three-dot diff = PR's own changes; *.md as a pathspec matches at
+          # any depth. A diff failure fails the job loudly rather than
+          # silently skipping lint.
+          changed=$(git diff --name-only "origin/${BASE_REF}...HEAD" -- '*.md' '.markdownlint-cli2.jsonc')
+          if [ -n "$changed" ]; then
+            printf '%s\n' "$changed"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No *.md or .markdownlint-cli2.jsonc changes vs ${BASE_REF} — lint steps will skip"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
   markdown-lint:
     name: markdownlint
+    needs: changes
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -38,6 +81,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: markdownlint-cli2
+        if: needs.changes.outputs.changed == 'true'
         uses: DavidAnson/markdownlint-cli2-action@696eb3f2509270d7b882d2aa68347bc676e7af34 # v25.0.0
         with:
           config: .markdownlint-cli2.jsonc
@@ -45,6 +89,7 @@ jobs:
 
   link-check:
     name: lychee link check
+    needs: changes
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -52,6 +97,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check links with lychee
+        if: needs.changes.outputs.changed == 'true'
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           # tak.gov rejects cloud-IP fetchers; GitHub issue/PR links trip rate limits.

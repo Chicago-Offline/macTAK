@@ -113,4 +113,4 @@ otool -L "$DEST/libEGL.dylib" | grep -q 'Metal.framework' \
   for lib in libEGL libGLESv2; do echo "sha256 $lib.dylib: $(shasum -a 256 "$DEST/$lib.dylib" | cut -d' ' -f1)"; done
 } > "$DEST/PROVENANCE.txt"
 log "ANGLE staged in $DEST"
-cat "$DEST/PROVENANCE.txt" | sed 's/^/[fetch-angle]   /'
+sed 's/^/[fetch-angle]   /' "$DEST/PROVENANCE.txt"

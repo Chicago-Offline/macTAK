@@ -30,6 +30,7 @@ make test-render    # GLGlobe → EGL pbuffer → readback, PASS/FAIL
 | `render/run.sh` | Compiles the above ahead of the engine jar on the classpath and runs the canary. |
 | `../g1/patches/glsl-es-version-on-angle.patch` | Engine emitted desktop `#version 330` on `__APPLE_OSX__`; ANGLE is real ES → `#version 300 es` (trap 2). |
 | `../g1/patches/terraintile-guard-missing-attribs.patch` | `GLTerrainTile` enabled attrib `-1` for shader variants without normals/nodata/ecef → `GL_INVALID_VALUE` every frame (trap 3). |
+| `../g1/patches/megatexture-release-erase-while-iterating.patch` | `GLMegaTexture::release()/clear()` erased map nodes through the iterator they were walking → SIGSEGV on `GLMapView.release()` (trap 10). |
 
 `dev/g1/build-native.sh` grew `MACTAK_GLES=stub|angle` (default `stub`; CI
 has no ANGLE). In `angle` mode the engine links `angle-dist/libGLESv2.dylib`
@@ -115,6 +116,14 @@ by path, gets `@loader_path` in its rpath, and `native-dist/` receives
 9. **ANGLE's `libEGL` is a thin loader**: it `dlopen`s `libGLESv2` from its
    own directory, so the pair must be staged side by side. `install_name_tool`
    invalidates Electron's signature — ad-hoc re-sign or dyld refuses to load.
+10. **`GLMegaTexture::release()` is a use-after-free in upstream.** Both it
+    and `clear()` loop `for (it = tiles.begin(); …; it++) releaseTile(it->first)`
+    and `releaseTile` does `tiles.erase(entry)` — `it++` then reads a freed
+    `std::map` node. Harmless whenever the allocator leaves the node intact
+    (every local run), SIGSEGV in `GLMegaTexture::release()+0xb8` on the
+    first `macos-26` CI run (Apple Paravirtual GPU, different alloc/free
+    pattern) — *after* the smoke had already printed PASS-worthy numbers.
+    Patch snapshots the keys before releasing.
 
 ## Known-benign noise
 

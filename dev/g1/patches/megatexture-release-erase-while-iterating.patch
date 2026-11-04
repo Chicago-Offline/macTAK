@@ -1,0 +1,29 @@
+--- a/tmp/takeng-src/cpp/renderer/GLMegaTexture.cpp
++++ b/tmp/takeng-src/cpp/renderer/GLMegaTexture.cpp
+@@ -135,14 +135,24 @@
+     if (pool.capacity() < tiles.size())
+         pool.reserve(tiles.size());
+     const std::size_t limit = tiles.size();
++    // releaseTile erases from `tiles`; iterate a snapshot of the keys
++    std::vector<TileIndex> keys;
++    keys.reserve(tiles.size());
+     for (auto it = tiles.begin(); it != tiles.end(); it++)
+-        releaseTile(it->first, (pool.size() < limit));
++        keys.push_back(it->first);
++    for (auto it = keys.begin(); it != keys.end(); it++)
++        releaseTile(*it, (pool.size() < limit));
+     tiles.clear();
+ }
+ void GLMegaTexture::release() NOTHROWS
+ {
++    // releaseTile erases from `tiles`; iterate a snapshot of the keys
++    std::vector<TileIndex> keys;
++    keys.reserve(tiles.size());
+     for (auto it = tiles.begin(); it != tiles.end(); it++)
+-        releaseTile(it->first, false);
++        keys.push_back(it->first);
++    for (auto it = keys.begin(); it != keys.end(); it++)
++        releaseTile(*it, false);
+     tiles.clear();
+     for (auto it = pool.begin(); it != pool.end(); it++)
+         GLOffscreenFramebuffer_release(*it);

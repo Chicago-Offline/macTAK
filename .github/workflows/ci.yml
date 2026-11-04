@@ -220,6 +220,7 @@ jobs:
           path: |
             dev/g2/angle-dist/PROVENANCE.txt
             dev/g2/build/render-smoke.ppm
+            hs_err_pid*.log
           if-no-files-found: error
 
   commo-stack:

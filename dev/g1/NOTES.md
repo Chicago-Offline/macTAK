@@ -1,6 +1,6 @@
 # dev/g1 — G1: JVM host + native JNI glue (macOS arm64)
 
-## State (G1 Milestone 1 — JVM in-process load): DONE locally, CI pending
+## State (G1): M1–M3 DONE — CI green; remaining: track persistence (tracks DB) + the exit demo (received CoT plotted in-memory)
 
 `dev/g1/build-native.sh` now produces **two** dylibs:
 

@@ -92,20 +92,54 @@ public final class HeadlessCLI {
     /**
      * G1.5: resolve an ATAK data package (DataPackage.java), extracting its
      * PKCS#12 pair to a private temp dir. Failure prints the reason, exits 2.
+     *
+     * The dir and the extracted PKCS#12s never outlive this process:
+     * deleteOnExit covers every exit path (System.exit here and in main,
+     * SIGINT/SIGTERM) — the dir is registered first so its files, registered
+     * after, delete first (deleteOnExit is LIFO) — and a failed open() wipes
+     * the dir at once, so a mid-extraction failure leaves nothing either.
+     * kill -9 is the one exception, as with any temp cleanup.
      */
     private static DataPackage.Resolved resolveDataPackage(String dpPath) {
+        final File certDir;
         try {
-            File dp = new File(dpPath);
-            File certDir = Files.createTempDirectory("mactak-dp-certs.").toFile();
-            DataPackage.Resolved dpResolved = DataPackage.open(dp, certDir);
-            System.out.println("headless: datapackage resolved " + dpResolved);
-            return dpResolved;
+            certDir = Files.createTempDirectory("mactak-dp-certs.").toFile();
         } catch (IOException e) {
+            System.err.println("atak-headless: cannot use data package '"
+                    + dpPath + "': cannot create temp cert dir: " + e.getMessage());
+            System.exit(2);
+            return null;    // not reached
+        }
+        certDir.deleteOnExit();
+        final DataPackage.Resolved dpResolved;
+        try {
+            dpResolved = DataPackage.open(new File(dpPath), certDir);
+        } catch (IOException e) {
+            deleteTree(certDir);    // open() may have died mid-extraction
             System.err.println("atak-headless: cannot use data package '"
                     + dpPath + "': " + e.getMessage());
             System.exit(2);
             return null;    // not reached
         }
+        if (dpResolved.certPath != null)
+            new File(dpResolved.certPath).deleteOnExit();
+        if (dpResolved.caPath != null)
+            new File(dpResolved.caPath).deleteOnExit();
+        System.out.println("headless: datapackage resolved " + dpResolved);
+        return dpResolved;
+    }
+
+    /**
+     * Best-effort recursive delete for the cert temp dir (it holds only the
+     * flat PKCS#12 files DataPackage wrote — no subdirs, no links); like any
+     * temp cleanup it must never mask the real error by throwing.
+     */
+    private static void deleteTree(File dir) {
+        File[] kids = dir.listFiles();
+        if (kids != null)
+            for (File kid : kids)
+                deleteTree(kid);
+        dir.delete();
     }
 
     private static void usage(int code) {

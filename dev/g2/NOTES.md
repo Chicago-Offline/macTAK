@@ -209,7 +209,6 @@ when it bites.
 - Build ANGLE from source at a pinned commit (retire the Electron source;
   roadmap has this at G5).
 
-
 ## G2.2 — first map content: a GeoJSON FeatureLayer through the engine on ANGLE
 
 `dev/g2/render/run.sh --layer FILE` opens the file through the G1.3 feature

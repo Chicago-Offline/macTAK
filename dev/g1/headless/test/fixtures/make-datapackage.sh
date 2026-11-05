@@ -11,6 +11,16 @@
 # documented follow-up (dev/g1/NOTES.md, G1.5).
 set -euo pipefail
 
+command -v openssl >/dev/null 2>&1 || {
+    echo "make-datapackage: openssl not found in PATH — it builds the fixture certs" \
+        "(any OpenSSL; macOS's LibreSSL is fine; e.g. brew install openssl)" >&2
+    exit 1
+}
+command -v zip >/dev/null 2>&1 || {
+    echo "make-datapackage: zip not found in PATH — it packs the .dp" >&2
+    exit 1
+}
+
 OUT_DIR="$(cd "$(dirname "$1")" && pwd)"
 OUT="$OUT_DIR/$(basename "$1")"
 CALLSIGN="${2:-DP-UNIT}"
@@ -22,13 +32,14 @@ CERTS="$WORK/certs"
 mkdir -p "$CERTS"
 
 # Real PKCS#12s (self-signed, password atakatak) so the fixture is honest
-# bytes; the canary checks sizes, not a TLS handshake.
+# bytes; the canary checks sizes, not a TLS handshake. Client and CA both
+# self-sign via plain `req -x509`: LibreSSL (/usr/bin/openssl on macOS) has
+# no -CA/-CAkey in req, and no assertion here needs a signed chain.
 openssl req -x509 -newkey rsa:2048 -keyout "$WORK/ca.key" -out "$WORK/ca.crt" \
     -days 30 -nodes -subj "/CN=mactak-dp-fixture-ca"
 openssl req -x509 -newkey rsa:2048 -keyout "$WORK/client.key" \
     -out "$WORK/client.crt" -days 30 -nodes \
-    -subj "/CN=mactak-dp-fixture-client" \
-    -CA "$WORK/ca.crt" -CAkey "$WORK/ca.key" -set_serial 1
+    -subj "/CN=mactak-dp-fixture-client"
 openssl pkcs12 -export -in "$WORK/client.crt" -inkey "$WORK/client.key" \
     -out "$CERTS/client.p12" -passout pass:atakatak -name client
 openssl pkcs12 -export -in "$WORK/ca.crt" -inkey "$WORK/ca.key" \

@@ -9,6 +9,13 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$HERE/../src/mactak/headless"
 
+for tool in javac java; do
+    command -v "$tool" >/dev/null 2>&1 || {
+        echo "datapackage-canary: $tool not found in PATH — the canary needs a JDK >= 8" >&2
+        exit 1
+    }
+done
+
 WORK="$(mktemp -d /tmp/mactak-dp-test.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 

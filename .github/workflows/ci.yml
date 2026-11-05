@@ -361,6 +361,12 @@ jobs:
             src/takkernel/port/build/java/test-results/test/
           if-no-files-found: warn
 
+      - name: Data-package importer canary
+        # G1.5: pure-JDK importer, so its canary needs no natives and no
+        # server — openssl fixture + javac/java assertions (test/datapackage.sh).
+        if: needs.changes.outputs.changed == 'true'
+        run: bash dev/g1/headless/test/datapackage.sh
+
   lint:
     name: lint (shell + workflows)
     needs: changes

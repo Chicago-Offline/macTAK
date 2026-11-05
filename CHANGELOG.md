@@ -7,7 +7,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
-- Nothing yet.
+### Added
+
+- `atak-headless --datapackage FILE` resolves an ATAK data package instead of
+  hand-feeding flags: CoT host:port from `preference.pref`'s `cot_streams`,
+  the callsign, and the PKCS#12 pair extracted to a temp dir — explicit
+  flags still win, `MACTAK_CERT_PASS` overrides the package's password, and
+  failures exit 2. Pure-JDK importer hardened against XXE and Zip-Slip;
+  canary (`test/datapackage.sh`) runs in the `jvm-tests` CI job.
 
 ## [0.3.0] - 2026-11-05 — G2: map renders (ANGLE on Metal)
 

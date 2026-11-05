@@ -89,12 +89,36 @@ public final class HeadlessCLI {
         }
     }
 
+    /**
+     * G1.5: resolve an ATAK data package (DataPackage.java), extracting its
+     * PKCS#12 pair to a private temp dir. Failure prints the reason, exits 2.
+     */
+    private static DataPackage.Resolved resolveDataPackage(String dpPath) {
+        try {
+            File dp = new File(dpPath);
+            File certDir = Files.createTempDirectory("mactak-dp-certs.").toFile();
+            DataPackage.Resolved dpResolved = DataPackage.open(dp, certDir);
+            System.out.println("headless: datapackage resolved " + dpResolved);
+            return dpResolved;
+        } catch (IOException e) {
+            System.err.println("atak-headless: cannot use data package '"
+                    + dpPath + "': " + e.getMessage());
+            System.exit(2);
+            return null;    // not reached
+        }
+    }
+
     private static void usage(int code) {
         System.err.println(
                 "usage: atak-headless --connect host:port [--uid UID] [--callsign CS]\n" +
                 "                     [--duration SECONDS] [--send-marker LAT LON] [--db PATH]\n" +
                 "                     [--cert CLIENT.p12 --ca TRUSTSTORE.p12]   (SSL; passwords via\n" +
                 "                      MACTAK_CERT_PASS / MACTAK_CA_PASS, default 'atakatak')\n" +
+                "       atak-headless --datapackage FILE   (an ATAK data package: host:port\n" +
+                "                      from preference.pref's cot_streams, callsign, and the\n" +
+                "                      PKCS#12 pair extracted to a temp dir; --connect /\n" +
+                "                      --callsign / --cert + --ca override what it resolved,\n" +
+                "                      MACTAK_CERT_PASS overrides the package's cert password)\n" +
                 "       atak-headless --layer FILE [--layer FILE ...] [--layer-db DIR]\n" +
                 "                     [--expect-features N] [--quiet]");
         System.exit(code);
@@ -119,8 +143,8 @@ public final class HeadlessCLI {
         }
 
         String host = null, uid = "g1-headless-" + (System.nanoTime() % 1000000L),
-               callsign = "HEADLESS", markerLat = null, markerLon = null, dbPath = null,
-               certPath = null, caPath = null;
+               callsign = null, markerLat = null, markerLon = null, dbPath = null,
+               certPath = null, caPath = null, dpPath = null, dpCertPass = null;
         int port = -1, duration = 15;
 
         for (int i = 0; i < args.length; i++) {
@@ -153,11 +177,32 @@ public final class HeadlessCLI {
                                     certPath = args[++i]; break;
                 case "--ca":        if (i + 1 >= args.length) usage(2);
                                     caPath = args[++i]; break;
+                case "--datapackage":
+                                    if (i + 1 >= args.length) usage(2);
+                                    dpPath = args[++i]; break;
                 default: usage(2);
             }
         }
-        if (host == null) usage(2);
+        if (host == null && dpPath == null) usage(2);
         if ((certPath == null) != (caPath == null)) usage(2);   // SSL needs both
+        // G1.5: an ATAK data package fills in whatever the flags left unset
+        // (explicit flags win); MACTAK_CERT_PASS overrides its password, below.
+        if (dpPath != null) {
+            DataPackage.Resolved dp = resolveDataPackage(dpPath);
+            if (host == null) {
+                host = dp.host;
+                port = dp.port;
+            }
+            if (callsign == null && dp.callsign != null)
+                callsign = dp.callsign;
+            if (certPath == null) {
+                certPath = dp.certPath;
+                caPath = dp.caPath;
+            }
+            dpCertPass = dp.certPass;
+        }
+        if (callsign == null)
+            callsign = "HEADLESS";
 
         final AtomicInteger received = new AtomicInteger();
         final AtomicInteger persisted = new AtomicInteger();
@@ -241,7 +286,10 @@ public final class HeadlessCLI {
                     + " uid=" + uid + " callsign=" + callsign);
             // A client cert switches commo's streaming interface to SSL. Data-package
             // PKCS#12 is RC2-40: OpenSSL 3 needs its legacy provider (NativeSsl shim).
-            final String certPass = env("MACTAK_CERT_PASS", "atakatak");
+            // G1.5 precedence: MACTAK_CERT_PASS over the data package's
+            // firecrypt Password over the built-in default.
+            final String certPass = env("MACTAK_CERT_PASS",
+                    dpCertPass != null ? dpCertPass : "atakatak");
             final String caPass = env("MACTAK_CA_PASS", certPass);
             final byte[] clientCert = certPath == null ? null : readFile(certPath);
             final byte[] caCert = caPath == null ? null : readFile(caPath);

@@ -395,11 +395,38 @@ Continuing G1.3's numbering (these are traps 16–21):
   build-commo.sh > log` wrapper sees exit 143 even on success (the log ends
   with `comms stack OK`). Pre-existing.
 
+## G1.5 — the `--datapackage` importer
+
+`atak-headless --datapackage FILE.dp` resolves an ATAK data package instead
+of hand-feeding flags: `host:port[:proto]` from `preference.pref`'s
+`cot_streams` `address0`, the `location_units` callsign, and the PKCS#12
+pair (firecrypt `ClientFile`/`CAFile` when present, else the trust-named
+file and the other) extracted to a private temp dir. Precedence: explicit
+flags > package > defaults; `MACTAK_CERT_PASS` overrides the package's
+firecrypt `Password` (default `atakatak` unchanged). Failure → one line +
+exit 2.
+
+- `DataPackage.java` is pure JDK (java.util.zip + DOM) — no natives — so the
+  canary (`test/datapackage.sh`, a step of the `jvm-tests` CI job) compiles
+  it with Zulu 8 and runs javac+java assertions against a synthetic package
+  (`test/fixtures/make-datapackage.sh`: openssl self-signed p12s + pref XML;
+  the recipe is committed, no binary fixture). No JUnit, matching the repo
+  idiom.
+- Hardening matches the CoT side's posture: DOCTYPE disallowed and external
+  entities off when parsing `preference.pref` (XXE); zip entry names with
+  `..`, absolute paths or backslashes are refused before extraction
+  (Zip-Slip), and extraction targets are re-verified canonically under the
+  temp dir; the resolved line never prints the password.
+- **The key names are verified against the fixture only, not yet against a
+  real OpenTAKServer package** (none existed on this machine). The parser is
+  deliberately liberal (`addressN`/`callsign` wherever they appear, firecrypt
+  by substring), but the first live-package run must confirm the
+  `cot_streams`/`location_units`/`plugin_firecrypt` spellings before this
+  replaces flag plumbing at a demo.
+
 ## Follow-ups (G1 done)
 
 - OTS upstream: `auto_delete` per-EUD queues; silent drop on callsign
   collision. Worth filing.
 - The `[commo-diag]` WARNING probes (patch 0001) are loud on every run; demote
   or gate behind `MACTAK_COMMO_DIAG` once the stack has been quiet for a while.
-- A data-package importer (`--datapackage ZIP` → host, port, certs,
-  passwords from `preference.pref`) is the obvious UX step toward G2.

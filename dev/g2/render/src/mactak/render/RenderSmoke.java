@@ -6,6 +6,10 @@ import com.atakmap.map.layer.Layers;
 import com.atakmap.map.layer.feature.Adapters;
 import com.atakmap.map.layer.feature.FeatureLayer3;
 import com.atakmap.map.layer.feature.geometry.Envelope;
+import com.atakmap.map.layer.raster.DatasetDescriptor;
+import com.atakmap.map.layer.raster.DatasetDescriptorFactory2;
+import com.atakmap.map.layer.raster.PersistentRasterDataStore;
+import com.atakmap.map.layer.raster.mobileimagery.MobileImageryRasterLayer2;
 import com.atakmap.map.opengl.GLMapView;
 
 import mactak.headless.LayerStore;
@@ -50,6 +54,7 @@ public final class RenderSmoke {
       + "  --frames N    frames to render (default 5)\n"
       + "  --out FILE    write the last frame (.png via ImageIO, else binary PPM)\n"
       + "  --layer FILE  vector file to render (GeoJSON/GPKG/KML/SHP; repeatable)\n"
+      + "  --basemap F   raster basemap (MBTiles) rendered under the layers (repeatable)\n"
       + "  --layer-db    feature store dir (default: temp)\n"
       + "  --res M       camera resolution, metres/pixel (default: fit layer bounds)\n"
       + "  --at LAT,LON  camera centre (default: layer bounds centre)\n"
@@ -60,6 +65,7 @@ public final class RenderSmoke {
     public static void main(String[] args) throws IOException {
         List<String> libs = new ArrayList<>();
         List<File> layers = new ArrayList<>();
+        List<File> basemaps = new ArrayList<>();
         String egl = null, gles = null, out = null, layerDb = null;
         int w = 512, h = 512, frames = 5;
         long settleMs = 3000;
@@ -73,6 +79,7 @@ public final class RenderSmoke {
                 case "--out": out = args[++i]; break;
                 case "--frames": frames = Integer.parseInt(args[++i]); break;
                 case "--layer": layers.add(new File(args[++i])); break;
+                case "--basemap": basemaps.add(new File(args[++i])); break;
                 case "--layer-db": layerDb = args[++i]; break;
                 case "--res": res = Double.parseDouble(args[++i]); break;
                 case "--at": {
@@ -124,13 +131,47 @@ public final class RenderSmoke {
         com.atakmap.map.EngineLibrary.initialize();
         // the host registers the SDK's GLLayer/GLStyle SPIs (ATAK's MapView does this)
         Layers.registerAll();
+        // GdalTileReader is the org.gdal SWIG path (no bindings on macOS); it probes
+        // every tile URI first and throws UnsatisfiedLinkError on the GL worker.
+        com.atakmap.map.layer.raster.tilereader.TileReaderFactory.unregisterSpi(
+                com.atakmap.map.layer.raster.gdal.GdalTileReader.SPI);
         Globe globe = new Globe();
         GLMapView view = new GLMapView(ctx, globe, 0, 0, w, h);
         ctx.setGLMapView(view);
         view.start();
 
+        // --basemap: MBTiles through the raster stack (TilesetLayerInfoSpi -> MBTilesTileReader ->
+        // BitmapFactory -> texture). Added first so it draws beneath the vector layers.
+        PersistentRasterDataStore rasterStore = null;
+        Envelope rasterBounds = null;
+        if (!basemaps.isEmpty()) {
+            if (layerDb == null) layerDb = Files.createTempDirectory("mactak-render-layers").toString();
+            File rasterDir = new File(layerDb, "raster");
+            rasterDir.mkdirs();
+            DatasetDescriptorFactory2.register(com.atakmap.android.maps.tilesets.TilesetLayerInfoSpi.INSTANCE);
+            rasterStore = new PersistentRasterDataStore(new File(rasterDir, "layers.sqlite"), rasterDir);
+            for (File f : basemaps) {
+                if (!f.isFile()) { System.err.println("render-smoke: no such basemap: " + f); System.exit(2); }
+                if (!rasterStore.add(f)) { System.err.println("render-smoke: FAIL: no raster provider accepted " + f.getName()); System.exit(1); }
+            }
+            com.atakmap.map.layer.raster.RasterDataStore.DatasetDescriptorCursor c = rasterStore.queryDatasets();
+            try {
+                while (c.moveToNext()) {
+                    DatasetDescriptor d = c.get();
+                    Envelope e = d.getCoverage(null).getEnvelope();
+                    System.out.printf("render-smoke: basemap %s type=%s provider=%s res [%.2f .. %.2f] m/px cov lat [%.4f, %.4f] lon [%.4f, %.4f]%n",
+                            d.getName(), d.getDatasetType(), d.getProvider(), d.getMaxResolution(null), d.getMinResolution(null), e.minY, e.maxY, e.minX, e.maxX);
+                    rasterBounds = rasterBounds == null ? new Envelope(e.minX, e.minY, 0, e.maxX, e.maxY, 0) : union(rasterBounds, e);
+                }
+            } finally {
+                c.close();
+            }
+            globe.addLayer(new MobileImageryRasterLayer2("mactak-basemap", rasterStore, null));
+        }
+
         // --layer: G1.3 feature stack -> FeatureLayer -> globe; frame the camera on it.
         LayerStore store = null;
+        Envelope frame = rasterBounds;
         if (!layers.isEmpty()) {
             if (layerDb == null) layerDb = Files.createTempDirectory("mactak-render-layers").toString();
             store = new LayerStore(layerDb);
@@ -140,7 +181,10 @@ public final class RenderSmoke {
             System.out.printf("render-smoke: %d feature(s), bounds lat [%.5f, %.5f] lon [%.5f, %.5f]%n",
                     store.featureCount(), b.minY, b.maxY, b.minX, b.maxX);
             globe.addLayer(new FeatureLayer3("mactak-layer", Adapters.adapt(store.dataStore())));
-
+            frame = b;   // vector bounds win: that's what the fixture is about
+        }
+        if (frame != null) {
+            Envelope b = frame;
             double clat = Double.isNaN(atLat) ? (b.minY + b.maxY) / 2 : atLat;
             double clon = Double.isNaN(atLon) ? (b.minX + b.maxX) / 2 : atLon;
             if (Double.isNaN(res)) {
@@ -158,7 +202,8 @@ public final class RenderSmoke {
         int rendered = 0;
         // layers load asynchronously: keep pumping frames until settleMs has
         // elapsed (and at least `frames` frames have run)
-        long deadline = System.currentTimeMillis() + (layers.isEmpty() ? 0 : settleMs);
+        boolean hasContent = !layers.isEmpty() || !basemaps.isEmpty();
+        long deadline = System.currentTimeMillis() + (hasContent ? settleMs : 0);
         for (int i = 0; i < frames || System.currentTimeMillis() < deadline; i++) {
             ctx.pump();
             view.render();
@@ -169,7 +214,7 @@ public final class RenderSmoke {
                 glErrors++;
                 if (glErrors <= 10) System.err.printf("render-smoke: frame %d GL error 0x%04x%n", i, err);
             }
-            if (!layers.isEmpty()) {
+            if (hasContent) {
                 try { Thread.sleep(16); } catch (InterruptedException e) { break; }
             }
         }
@@ -195,13 +240,18 @@ public final class RenderSmoke {
         view.release();
         globe.dispose();
         if (store != null) store.close();
+        if (rasterStore != null) rasterStore.dispose();
         NativeEgl.release();
         NativeEgl.destroy();
 
-        boolean pass = readOk && glErrors == 0 && sentinel == 0 && (layers.isEmpty() || content > 0);
-        if (!layers.isEmpty() && content == 0) System.err.println("render-smoke: FAIL: layer attached but frame has no content pixels");
+        boolean pass = readOk && glErrors == 0 && sentinel == 0 && (!hasContent || content > 0);
+        if (hasContent && content == 0) System.err.println("render-smoke: FAIL: layer attached but frame has no content pixels");
         System.out.println(pass ? "render-smoke: PASS" : "render-smoke: FAIL");
         System.exit(pass ? 0 : 1);
+    }
+
+    private static Envelope union(Envelope a, Envelope b) {
+        return new Envelope(Math.min(a.minX, b.minX), Math.min(a.minY, b.minY), 0, Math.max(a.maxX, b.maxX), Math.max(a.maxY, b.maxY), 0);
     }
 
     /** Pixels that are neither the sentinel nor the engine's black clear. */

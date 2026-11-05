@@ -1,5 +1,16 @@
 # dev/g2 — G2: map renders in a native macOS window (ANGLE on Metal)
 
+## State (G2.3 — 2026-11-05): an offline MBTiles basemap renders under the vector layer
+
+`make test-render` now also builds a synthetic graticule basemap
+(`fixtures/make-basemap.sh` → `build/fixtures/sf-graticule.mbtiles`, zoom
+10–14, EPSG:3857, Homebrew `gdal` CLI) and renders it under the GeoJSON
+fixture through the engine's raster pipeline:
+`PersistentRasterDataStore` → `MobileImageryRasterLayer2` → `GLQuadTileNode4`
+textures on ANGLE. Zero GL errors; every pixel has content; the graticule's
+coordinate labels line up with the vector layer's geometry. Section "G2.3"
+below.
+
 ## State (G2.2 — 2026-11-04): first map content — a GeoJSON FeatureLayer renders through the engine on ANGLE/Metal
 
 `make test-render` now renders `dev/g1/headless/test/fixtures/sf-landmarks.geojson`
@@ -25,9 +36,10 @@ the three contract issues found were on *our* side (below), not ANGLE's.
 ```sh
 make angle          # stage ANGLE → dev/g2/angle-dist, run EGL triangle smoke
 make build-angle    # engine + glue with ANGLE in the GLES slot (+ commo)
-make test-render    # GLGlobe → EGL pbuffer → readback, bare + GeoJSON layer, PASS/FAIL
+make test-render    # GLGlobe → EGL pbuffer → readback: bare, GeoJSON layer, MBTiles basemap, PASS/FAIL
 # one-offs:
 bash dev/g2/render/run.sh --layer FILE.geojson --at 37.7955,-122.3937 --res 1 --out /tmp/f.png
+bash dev/g2/render/run.sh --basemap FILE.mbtiles --layer FILE.geojson --out /tmp/b.png
 ```
 
 ## What's here
@@ -149,9 +161,8 @@ by path, gets `@loader_path` in its rpath, and `native-dist/` receives
 - Window surface: `CAMetalLayer` in an `NSView` → `eglCreateWindowSurface`;
   AppKit main thread vs JVM render thread (R4) decided here. Candidate:
   Swift/AppKit shell launching the JVM in-process via `libjli` (`JNI_CreateJavaVM`).
-- ~~First pixels with content~~ — done, G2.2 below. Still open: a **basemap**
-  (raster tiles) — `GLDatasetRasterLayer2` path, needs a local tile source
-  (MBTiles/GPKG raster fixture) since CI is offline.
+- ~~First pixels with content~~ — done, G2.2 below. ~~Still open: a **basemap**~~
+  — done, G2.3 below (MBTiles raster fixture generated offline by the gdal CLI).
 - Render goldens in CI (`ci-qa.md` tier 2): the pbuffer path is exactly the
   offscreen harness that plan assumed, and hosted `macos-26` already runs
   it on ANGLE/Metal (Apple Paravirtual device, ~170 ms/frame vs ~3–5 ms on
@@ -247,3 +258,77 @@ glyph rendering.
 
 - `[Unsafe]: Unsafe.allocateDirect lifetime management not supported` —
   the JVM `Unsafe` falls back to plain `allocateDirect`; harmless here.
+
+## G2.3 — an offline raster basemap under the vector layer
+
+`dev/g2/render/run.sh --basemap FILE.mbtiles` registers the dataset through
+`DatasetDescriptorFactory2` (`TilesetLayerInfoSpi`), adds the file to a
+`PersistentRasterDataStore` under the scratch layer DB, wraps the store in a
+`MobileImageryRasterLayer2` and adds it to the `Globe` *before* the feature
+layer. The fixture is deterministic and offline: `fixtures/MakeBasemap.java`
+paints a 0.01° checker with a graticule and coordinate labels as a PNG +
+`.pgw` world file; `fixtures/make-basemap.sh` warps it to EPSG:3857, writes
+MBTiles (PNG tiles) and builds overviews — 372 KB, zoom 10–14 over San
+Francisco. No network, no third-party imagery licence.
+
+### What's new
+
+| Path | Role |
+|---|---|
+| `fixtures/MakeBasemap.java`, `fixtures/make-basemap.sh` | Synthetic basemap → `build/fixtures/sf-graticule.mbtiles` (`gdalwarp` → `gdal_translate -of MBTILES` → `gdaladdo`). |
+| `RenderSmoke --basemap FILE` (repeatable) | Raster layer path above; prints the dataset's type/provider/resolution/coverage as the store sees it. |
+| `render/src/android/net/Uri.java` | `IOProviderFactory.createDatabase` goes through `Uri.fromFile` (trap 16). |
+| `render/src/android/os/SystemClock.java` | `elapsedRealtime()` is a native in the transplant (trap 18). |
+| `render/src/gov/tak/platform/commons/opengl/GLES20\|GLES30.java` | Shadow the port jar's JOGL-delegating classes with subclasses of the generated `android.opengl` shim (trap 19). |
+| `gen-gles-shim.py`: `uniformIsUnsigned` | `glUniform1ui` on a non-`uint` uniform is redirected to `glUniform1i` (trap 20). |
+| `jni-extra/mactak_egl.cpp` | `MACTAK_GL_DEBUG=2` now dumps the **Java** stack next to the native backtrace — attributes a GL error to the engine call site in one run. |
+
+### Traps found on the way (traps 16–21)
+
+16. **`android.net.Uri` is `Stub!`** and `IOProviderFactory.createDatabase`
+    → `Uri.fromFile` runs on the first raster-store open. Re-implemented
+    (`parse/fromFile/getScheme/getPath/getHost/getQueryParameter/
+    getFragment/decode/Builder`).
+17. **`GdalTileReader.SPI` probes every URI** and the jar's `GdalTileReader`
+    binds the `org.gdal` Java bindings, which the transplant doesn't ship →
+    `UnsatisfiedLinkError` from inside the SPI chain for *any* dataset.
+    `Layers.registerAll()` registers it; the host unregisters it right after
+    (`TileReaderFactory.unregisterSpi(GdalTileReader.SPI)`). The engine's own
+    native GDAL (`NativeGdal`) is unaffected. Revisit when a GDAL-backed
+    raster (GeoTIFF) is on the path — that needs the `org.gdal` JNI, not a
+    shim.
+18. **`SystemClock.elapsedRealtime()` is a native method in the transplant**
+    (`UnsatisfiedLinkError`, not `Stub!`). Shadowed with `System.nanoTime()`.
+19. **`gov.tak.platform.commons.opengl.GLES20/30` in the port jar delegate to
+    JOGL** (`javax.media.opengl.GL`) → `NoClassDefFoundError` the first time
+    the raster renderer touches them (`GLQuadTileNode4` uses that package,
+    the feature renderer uses `android.opengl`). Shadowed as
+    `extends android.opengl.GLES20/30 implements GLES20Constants/…`.
+20. **`glUniform1ui` on a sampler/int uniform** — `GLQuadTileNode4` sets
+    `uTexture` with the unsigned variant; Android drivers accept it, ANGLE
+    raises `GL_INVALID_OPERATION` and the texture unit stays unset (black
+    tiles). The shim queries the active uniform type once per program and
+    routes non-`uint` uniforms to `glUniform1i`.
+21. **`gdalwarp` needs `-s_srs` for a PNG + world file.** The PNG driver
+    ignores a sidecar `.prj`; without `-s_srs EPSG:4326` the warp has no
+    source CRS and the MBTiles driver fails later with the misleading
+    `Could not find an appropriate zoom level` (there is no `ZOOM_LEVEL`
+    creation option to "fix" it with).
+
+### Known-benign noise
+
+- `[GLQuadTileNode4]: asynchronous read error` with **no stack trace** —
+  `MBTilesTileReader.getTileImpl` returns `ReadResult.ERROR` (throwable
+  `null`) when a requested tile is simply absent from the sparse pyramid
+  (edges of the fixture). Not a decode or I/O failure; a real one logs
+  `[MBTilesTileReader]: error` with a trace first.
+- KHR_debug `glUniform4f: Uniform size does not match uniform method`,
+  once per composited tile, from `GLQuadTileNode4.resolveTexture`
+  (child-texture FBO compositing). That path runs from a queued render-thread
+  event, never calls `glUseProgram`, and sets `core.shader.uColor` on
+  **whatever program happens to be current** — a latent upstream bug that
+  Android drivers don't report. The composite is discarded as soon as the
+  tile's own read lands, so the picture is unaffected; it also happens
+  outside `view.render()`, which is why the frame-loop `glGetError` count
+  stays 0. Fix (bind `core.shader.handle` before compositing) belongs in an
+  engine patch once the tile-sharing paths are exercised with real imagery.

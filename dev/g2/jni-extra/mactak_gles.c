@@ -114,6 +114,32 @@ static GLenum signedTwin(GLenum type)
     }
 }
 
+/* Is uniform `location` of the current program a uint/uvec? (cached per program/location) */
+static int uniformIsUnsigned(GLint location)
+{
+    static struct { GLuint prog; GLint loc; int isuint; } cache[256];
+    static int ncache;
+    GLint prog = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
+    if (prog <= 0 || location < 0) return 0;
+    for (int i = 0; i < ncache; i++)
+        if (cache[i].prog == (GLuint)prog && cache[i].loc == location) return cache[i].isuint;
+    int isuint = 0;
+    GLint count = 0;
+    glGetProgramiv((GLuint)prog, GL_ACTIVE_UNIFORMS, &count);
+    for (GLint u = 0; u < count; u++) {
+        char name[256]; GLint size = 0; GLenum type = 0;
+        glGetActiveUniform((GLuint)prog, (GLuint)u, sizeof name, NULL, &size, &type, name);
+        char *br = strchr(name, '[');          /* arrays report "name[0]" */
+        if (br) *br = '\0';
+        if (glGetUniformLocation((GLuint)prog, name) != location) continue;
+        isuint = (type == GL_UNSIGNED_INT || type == GL_UNSIGNED_INT_VEC2 || type == GL_UNSIGNED_INT_VEC3 || type == GL_UNSIGNED_INT_VEC4);
+        break;
+    }
+    if (ncache < 256) { cache[ncache].prog = (GLuint)prog; cache[ncache].loc = location; cache[ncache].isuint = isuint; ncache++; }
+    return isuint;
+}
+
 /* Is attribute `index` of the current program integer-typed? (cached per program/index) */
 static int attribIsInteger(GLuint index)
 {
@@ -2060,7 +2086,7 @@ JNIEXPORT jint JNICALL Java_android_opengl_GLES30_glGetFragDataLocation__ILjava_
 JNIEXPORT void JNICALL Java_android_opengl_GLES30_glUniform1ui__II(JNIEnv *env, jclass cls, jint a0, jint a1)
 {
 
-    glUniform1ui((GLint)a0, (GLuint)a1);
+    (uniformIsUnsigned((GLint)a0) ? glUniform1ui((GLint)a0, (GLuint)a1) : glUniform1i((GLint)a0, (GLint)a1));
 
 }
 

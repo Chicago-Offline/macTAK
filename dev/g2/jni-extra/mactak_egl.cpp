@@ -146,6 +146,7 @@ namespace {
                 jclass thread = env->FindClass("java/lang/Thread");
                 jmethodID dump = thread ? env->GetStaticMethodID(thread, "dumpStack", "()V") : nullptr;
                 if (dump) env->CallStaticVoidMethod(thread, dump);
+                else env->ExceptionClear();   // debug aid must not leave an exception pending
             }
         }
     }

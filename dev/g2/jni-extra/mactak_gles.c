@@ -95,8 +95,9 @@ static void attribMinusOne(JNIEnv *env, const char *fn)
     if (nseen < 32) seen[nseen++] = fn;
     fprintf(stderr, "mactak_gles: %s(-1) ignored (inactive attribute); Java call site:\n", fn);
     jclass thread = (*env)->FindClass(env, "java/lang/Thread");
-    jmethodID dump = (*env)->GetStaticMethodID(env, thread, "dumpStack", "()V");
-    (*env)->CallStaticVoidMethod(env, thread, dump);
+    jmethodID dump = thread ? (*env)->GetStaticMethodID(env, thread, "dumpStack", "()V") : NULL;
+    if (dump) (*env)->CallStaticVoidMethod(env, thread, dump);
+    else (*env)->ExceptionClear(env);   /* debug aid must not leave an exception pending */
 }
 
 /* ANGLE's Metal backend refuses unsigned vertex formats for signed `int`
@@ -114,16 +115,31 @@ static GLenum signedTwin(GLenum type)
     }
 }
 
+/* Per-program type caches for the two redirects below. Keyed on GL program
+ * ids, which GL reuses after glDeleteProgram — so that entry point evicts. */
+static struct { GLuint prog; GLint loc; int isuint; } uniformCache[256];
+static int nUniformCache;
+static struct { GLuint prog, idx; int isint; } attribCache[256];
+static int nAttribCache;
+
+static void forgetProgram(GLuint prog)
+{
+    int j = 0;
+    for (int i = 0; i < nUniformCache; i++) if (uniformCache[i].prog != prog) uniformCache[j++] = uniformCache[i];
+    nUniformCache = j;
+    j = 0;
+    for (int i = 0; i < nAttribCache; i++) if (attribCache[i].prog != prog) attribCache[j++] = attribCache[i];
+    nAttribCache = j;
+}
+
 /* Is uniform `location` of the current program a uint/uvec? (cached per program/location) */
 static int uniformIsUnsigned(GLint location)
 {
-    static struct { GLuint prog; GLint loc; int isuint; } cache[256];
-    static int ncache;
     GLint prog = 0;
     glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
     if (prog <= 0 || location < 0) return 0;
-    for (int i = 0; i < ncache; i++)
-        if (cache[i].prog == (GLuint)prog && cache[i].loc == location) return cache[i].isuint;
+    for (int i = 0; i < nUniformCache; i++)
+        if (uniformCache[i].prog == (GLuint)prog && uniformCache[i].loc == location) return uniformCache[i].isuint;
     int isuint = 0;
     GLint count = 0;
     glGetProgramiv((GLuint)prog, GL_ACTIVE_UNIFORMS, &count);
@@ -136,20 +152,18 @@ static int uniformIsUnsigned(GLint location)
         isuint = (type == GL_UNSIGNED_INT || type == GL_UNSIGNED_INT_VEC2 || type == GL_UNSIGNED_INT_VEC3 || type == GL_UNSIGNED_INT_VEC4);
         break;
     }
-    if (ncache < 256) { cache[ncache].prog = (GLuint)prog; cache[ncache].loc = location; cache[ncache].isuint = isuint; ncache++; }
+    if (nUniformCache < 256) { uniformCache[nUniformCache].prog = (GLuint)prog; uniformCache[nUniformCache].loc = location; uniformCache[nUniformCache].isuint = isuint; nUniformCache++; }
     return isuint;
 }
 
 /* Is attribute `index` of the current program integer-typed? (cached per program/index) */
 static int attribIsInteger(GLuint index)
 {
-    static struct { GLuint prog, idx; int isint; } cache[256];
-    static int ncache;
     GLint prog = 0;
     glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
     if (prog <= 0) return 0;
-    for (int i = 0; i < ncache; i++)
-        if (cache[i].prog == (GLuint)prog && cache[i].idx == index) return cache[i].isint;
+    for (int i = 0; i < nAttribCache; i++)
+        if (attribCache[i].prog == (GLuint)prog && attribCache[i].idx == index) return attribCache[i].isint;
     int isint = 0;
     GLint count = 0;
     glGetProgramiv((GLuint)prog, GL_ACTIVE_ATTRIBUTES, &count);
@@ -161,7 +175,7 @@ static int attribIsInteger(GLuint index)
                  type == GL_UNSIGNED_INT || type == GL_UNSIGNED_INT_VEC2 || type == GL_UNSIGNED_INT_VEC3 || type == GL_UNSIGNED_INT_VEC4);
         break;
     }
-    if (ncache < 256) { cache[ncache].prog = (GLuint)prog; cache[ncache].idx = index; cache[ncache].isint = isint; ncache++; }
+    if (nAttribCache < 256) { attribCache[nAttribCache].prog = (GLuint)prog; attribCache[nAttribCache].idx = index; attribCache[nAttribCache].isint = isint; nAttribCache++; }
     const char *dbg = getenv("MACTAK_GL_DEBUG");
     if (dbg && atoi(dbg) >= 2)
         fprintf(stderr, "mactak_gles: program %d attrib %u integer=%d (active=%d)\n", prog, index, isint, count);
@@ -398,9 +412,8 @@ JNIEXPORT void JNICALL Java_android_opengl_GLES20_glDeleteFramebuffers__ILjava_n
 
 JNIEXPORT void JNICALL Java_android_opengl_GLES20_glDeleteProgram__I(JNIEnv *env, jclass cls, jint a0)
 {
-
+    forgetProgram((GLuint)a0);   /* GL reuses program ids; drop cached uniform/attrib types */
     glDeleteProgram((GLuint)a0);
-
 }
 
 JNIEXPORT void JNICALL Java_android_opengl_GLES20_glDeleteRenderbuffers__I_3II(JNIEnv *env, jclass cls, jint a0, jintArray a1, jint a2)

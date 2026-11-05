@@ -1,4 +1,13 @@
-.PHONY: help hooks build build-angle angle test test-roundtrip test-render lint clean
+.PHONY: help hooks build build-angle angle gen-gles-shim check-gen-gles-shim test test-roundtrip test-render lint clean
+
+# The android.opengl.GLES20/30 runtime is GENERATED (dev/g2/gen-gles-shim.py):
+# two Java classes, the JNI bodies and the stub-mode libGLESv2. Edit the
+# generator, run `make gen-gles-shim`, commit all five; CI diffs them.
+GLES_SHIM_GEN   := dev/g2/gen-gles-shim.py
+GLES_SHIM_JAR   := dev/spike/g0/transplants/android-port-3.1.0.jar
+GLES_SHIM_GL3H  := src/khronos/OpenGL/api/GLES3/gl3.h
+GLES_SHIM_OUT   := dev/g2/render/src/android/opengl/GLES20.java dev/g2/render/src/android/opengl/GLES30.java \
+                   dev/g2/jni-extra/mactak_gles.c dev/g2/jni-extra/mactak_gles_stub.c
 
 help:
 	@echo "Targets:"
@@ -6,6 +15,8 @@ help:
 	@echo "  build          - build native + commo (dev/g1/build-native.sh, dev/g1/build-commo.sh)"
 	@echo "  angle          - stage ANGLE (EGL/GLES on Metal) into dev/g2/angle-dist (dev/g2/fetch-angle.sh)"
 	@echo "  build-angle    - build native with ANGLE in the GLES slot (MACTAK_GLES=angle) + commo"
+	@echo "  gen-gles-shim  - regenerate the android.opengl GLES shim (Java + JNI + stub) from the transplant jar x gl3.h"
+	@echo "  check-gen-gles-shim - regenerate and fail if the committed shim files differ (CI drift gate)"
 	@echo "  test           - run smoke tests (dev/g1/smoke/run.sh)"
 	@echo "  test-roundtrip - run headless round-trip tests (dev/g1/headless/run.sh)"
 	@echo "  test-render    - G2 render smoke: engine GLGlobe into an EGL pbuffer on ANGLE, bare + GeoJSON layer + MBTiles basemap (dev/g2/render/run.sh)"
@@ -23,6 +34,22 @@ angle:
 
 build-angle: angle
 	MACTAK_GLES=angle bash dev/g1/build-native.sh && bash dev/g1/build-commo.sh
+
+gen-gles-shim:
+	python3 $(GLES_SHIM_GEN) $(GLES_SHIM_JAR) $(GLES_SHIM_GL3H) dev/g2/render/src/android/opengl \
+		dev/g2/jni-extra/mactak_gles.c dev/g2/jni-extra/mactak_gles_stub.c
+
+check-gen-gles-shim:
+	@tmp=$$(mktemp -d) && \
+	python3 $(GLES_SHIM_GEN) $(GLES_SHIM_JAR) $(GLES_SHIM_GL3H) $$tmp/opengl $$tmp/mactak_gles.c $$tmp/mactak_gles_stub.c >/dev/null && \
+	ok=1; \
+	for f in $(GLES_SHIM_OUT); do \
+		diff -u "$$f" "$$tmp/$$(basename $$f)" >/dev/null 2>&1 || diff -u "$$f" "$$tmp/opengl/$$(basename $$f)" >/dev/null 2>&1 \
+			|| { echo "[check-gen-gles-shim] DRIFT: $$f differs from generator output"; ok=0; }; \
+	done; \
+	rm -rf "$$tmp"; \
+	[ $$ok = 1 ] && echo "[check-gen-gles-shim] OK: committed shim matches the generator" \
+		|| { echo "[check-gen-gles-shim] run 'make gen-gles-shim' and commit the result"; exit 1; }
 
 test:
 	bash dev/g1/smoke/run.sh

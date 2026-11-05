@@ -202,8 +202,11 @@ is ordered roughly by when it bites.
   `RenderSmoke.countNonClear`'s r,g,b < 8 black threshold vs. a future
   dark basemap (the graticule fixture cannot trip it) — switch to a
   sentinel-vs-cleared comparison or a luminance histogram when the first
-  dark imagery lands — and `--settle`'s 3000 ms wall-clock margin
-  (comfortable at 7–15 ms/frame; revisit if hosted runners slow down).
+  dark imagery lands. (`--settle`'s 3000 ms wall-clock margin did race the
+  async layer query once hosted runners slowed — 2026-11-05: the layer smoke
+  failed with content=0 on a ~520 ms/frame rerun and on a milliseconds-per-frame
+  PR run alike; the smoke now polls the readback and keeps rendering until
+  content appears, capped at 5× settle / min 15 s.)
 - ~~First pixels with content~~ — done, G2.2 below. ~~Still open: a
   **basemap**~~ — done, G2.3 below (MBTiles raster fixture generated
   offline by the gdal CLI).

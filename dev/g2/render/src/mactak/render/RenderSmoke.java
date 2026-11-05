@@ -58,7 +58,9 @@ public final class RenderSmoke {
       + "  --layer-db    feature store dir (default: temp)\n"
       + "  --res M       camera resolution, metres/pixel (default: fit layer bounds)\n"
       + "  --at LAT,LON  camera centre (default: layer bounds centre)\n"
-      + "  --settle MS   wall time to keep rendering while layers load (default 3000)\n";
+      + "  --settle MS   min wall time to keep rendering while layers load (default 3000);\n"
+      + "                with content attached, rendering continues (up to 5x that, min 15 s)\n"
+      + "                until content pixels have appeared, so a slow runner can't race it\n";
 
     private RenderSmoke() { }
 
@@ -200,11 +202,19 @@ public final class RenderSmoke {
         int glErrors = 0;
         long t0 = System.nanoTime();
         int rendered = 0;
-        // layers load asynchronously: keep pumping frames until settleMs has
-        // elapsed (and at least `frames` frames have run)
+        // Layers load asynchronously: keep pumping frames until settleMs has
+        // elapsed (and at least `frames` frames have run). That floor alone
+        // raced the layer query on a loaded hosted runner (2026-11-05: 6
+        // frames at ~520 ms/frame checked out with content=0 where the same
+        // commit had passed 25 minutes earlier), so with content attached the
+        // readback is polled as frames run and rendering continues — up to a
+        // generous cap — until content pixels have actually appeared.
         boolean hasContent = !layers.isEmpty() || !basemaps.isEmpty();
         long deadline = System.currentTimeMillis() + (hasContent ? settleMs : 0);
-        for (int i = 0; i < frames || System.currentTimeMillis() < deadline; i++) {
+        long cap = System.currentTimeMillis() + (hasContent ? Math.max(settleMs * 5, 15000) : 0);
+        boolean contentSeen = !hasContent;
+        for (int i = 0; i < frames || System.currentTimeMillis() < deadline
+                || (!contentSeen && System.currentTimeMillis() < cap); i++) {
             ctx.pump();
             view.render();
             NativeEgl.finish();
@@ -215,6 +225,8 @@ public final class RenderSmoke {
                 if (glErrors <= 10) System.err.printf("render-smoke: frame %d GL error 0x%04x%n", i, err);
             }
             if (hasContent) {
+                if (rendered % 4 == 0)      // poll: has the async layer landed?
+                    contentSeen = NativeEgl.readPixels(px) && countNonClear(px, w, h) > 0;
                 try { Thread.sleep(16); } catch (InterruptedException e) { break; }
             }
         }

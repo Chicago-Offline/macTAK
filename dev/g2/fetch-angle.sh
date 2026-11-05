@@ -60,7 +60,10 @@ if [[ -z "$SRC" ]]; then
   if [[ ! -d "$unpacked/Electron.app" ]]; then
     log "no local Electron app; downloading electron v$ELECTRON_VER (darwin-arm64, ~120 MB)"
     mkdir -p "$HERE/build"
-    curl -fsSL -o "$zip.tmp" \
+    # --retry-all-errors: a dropped mid-transfer connection (curl 56, e.g. a
+    # 504 from the release CDN) is outside curl's default transient set, and
+    # a single-shot 120 MB fetch fails the whole CI job when it happens.
+    curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors --retry-max-time 600 -o "$zip.tmp" \
       "https://github.com/electron/electron/releases/download/v$ELECTRON_VER/electron-v$ELECTRON_VER-darwin-arm64.zip"
     echo "$ELECTRON_SHA256  $zip.tmp" | shasum -a 256 -c - >/dev/null \
       || { rm -f "$zip.tmp"; echo "FATAL: electron zip checksum mismatch" >&2; exit 1; }

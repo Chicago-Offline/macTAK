@@ -46,7 +46,7 @@ bash dev/g2/render/run.sh --basemap FILE.mbtiles --layer FILE.geojson --out /tmp
 
 | Path | Role |
 |---|---|
-| `fetch-angle.sh` | Stages `libEGL.dylib` + `libGLESv2.dylib` (arm64-thinned, `@rpath` install names, ad-hoc re-signed) into `angle-dist/` with `PROVENANCE.txt`. Source: `$MACTAK_ANGLE_SRC`, else an installed Electron app's bundled ANGLE (VS Code by default). |
+| `fetch-angle.sh` | Stages `libEGL.dylib` + `libGLESv2.dylib` (arm64-thinned, `@rpath` install names, ad-hoc re-signed) into `angle-dist/` with `PROVENANCE.txt`. Source: `$MACTAK_ANGLE_SRC`, else an installed Electron app's bundled ANGLE (VS Code by default). Downloads retry through transient release-CDN failures (504s). |
 | `smoke/egl-triangle.c` + `smoke/run.sh` | Pure C: Metal-platform display → pbuffer → ES3 context → shader → draw → readback. The "does ANGLE work on this box" gate, independent of the engine. |
 | `jni-extra/mactak_egl.cpp` | `mactak.render.NativeEgl` — EGL context owner inside `libtakenginejni` (dlopen-based so stub-mode builds still link). `MACTAK_GL_DEBUG=1` installs a `GL_KHR_debug` callback; `=2` adds native backtraces for the first errors. |
 | `render/src/mactak/render/` | `EglRenderContext` (the `RenderContext`/`RenderSurface` over `NativeEgl`, counterpart of upstream's `JOGLRenderContext`), `RenderSmoke` (the canary). |
@@ -207,6 +207,13 @@ is ordered roughly by when it bites.
   failed with content=0 on a ~520 ms/frame rerun and on a milliseconds-per-frame
   PR run alike; the smoke now polls the readback and keeps rendering until
   content appears, capped at 5× settle / min 15 s.)
+- **CI ops — hosted macOS runners (2026-11-05):** pool contention
+  queued jobs up to ~16 min. Queued is *waiting*, not stuck — GitHub
+  neither fails nor cancels a job for queue time. The day's two
+  cancellation events (one queued job; later both remaining queued
+  jobs, killed in one instant) match a manual run-level cancel, and
+  `gh run rerun <id> --failed` recovered each time — rerun jobs got
+  runners immediately and passed. Leave queued jobs alone.
 - ~~First pixels with content~~ — done, G2.2 below. ~~Still open: a
   **basemap**~~ — done, G2.3 below (MBTiles raster fixture generated
   offline by the gdal CLI).
@@ -327,7 +334,7 @@ Francisco. No network, no third-party imagery licence.
 | `gen-gles-shim.py`: `uniformIsUnsigned` | `glUniform1ui` on a non-`uint` uniform is redirected to `glUniform1i` (trap 20). |
 | `jni-extra/mactak_egl.cpp` | `MACTAK_GL_DEBUG=2` now dumps the **Java** stack next to the native backtrace — attributes a GL error to the engine call site in one run. |
 
-### Traps found on the way (traps 16–22)
+### Traps found on the way (traps 16–23)
 
 1. **`android.net.Uri` is `Stub!`** and `IOProviderFactory.createDatabase`
    → `Uri.fromFile` runs on the first raster-store open. Re-implemented
@@ -365,6 +372,12 @@ Francisco. No network, no third-party imagery licence.
    `render-angle` stayed green. `gen-gles-shim.py` now also emits
    `jni-extra/mactak_gles_stub.c`, a typed no-op for all 246 `gl3.h`
    prototypes; `build-native.sh` compiles that as the stub slot.
+8. **A mid-transfer drop kills the ANGLE staging download.** `curl` exit
+   56 (a release-CDN 504, 2026-11-05) is outside `curl`'s default
+   transient-error set, so a plain `curl -fsSL` fails a green CI build
+   on a retryable blip. `fetch-angle.sh` now downloads with
+   `--retry 5 --retry-delay 5 --retry-all-errors --retry-max-time 600`;
+   the zip's SHA256 pin is untouched (verified before the swap).
 
 ### Known-benign noise
 

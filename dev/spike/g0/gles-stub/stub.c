@@ -1,4 +1,6 @@
-/* G0 throwaway GLES-stub; real backend = ANGLE on Metal (G2) */
+/* G0 throwaway GLES-stub; real backend = ANGLE on Metal (G2).
+ * G2 note: this file once also stubbed 11 libxml2 symbols (xmlReaderForFile...),
+ * silently no-op'ing KML style parsing; the engine now links Homebrew libxml2. */
 void glActiveTexture(void) {}
 void glAttachShader(void) {}
 void glBindBuffer(void) {}
@@ -109,14 +111,3 @@ void sqlite3reset(void) {}
 void sqlite3sql(void) {}
 void sqlite3step(void) {}
 void sqlite3stmtbusy(void) {}
-void xmlFreeTextReader(void) {}
-void xmlReaderForFile(void) {}
-void xmlReaderForMemory(void) {}
-void xmlStrcasecmp(void) {}
-void xmlTextReaderConstName(void) {}
-void xmlTextReaderGetAttribute(void) {}
-void xmlTextReaderIsEmptyElement(void) {}
-void xmlTextReaderName(void) {}
-void xmlTextReaderNodeType(void) {}
-void xmlTextReaderRead(void) {}
-void xmlTextReaderValue(void) {}

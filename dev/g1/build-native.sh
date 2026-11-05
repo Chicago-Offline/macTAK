@@ -6,7 +6,8 @@
 # evidence tree or /tmp:
 #   src/takkernel/engine/src/main  →  dev/g1/build/engine (throwaway copy)
 #   + dev/spike/g0/patches/gdal-drift-*.patch (3-file GDAL API-drift set)
-#   + GLES stub (dev/spike/g0/gles-stub) as the libGLESv2 slot (ANGLE lands at G2)
+#   + GLES stub (dev/spike/g0/gles-stub) as the libGLESv2 slot, or ANGLE on
+#     Metal (MACTAK_GLES=angle; staged by dev/g2/fetch-angle.sh) — G2
 #   + nlohmann-json stand-in for tinygltf
 #   → libtakengine.dylib staged in dev/g1/native-dist/
 #   → canary: dlopen + Catch2 subset of engine/src/test/cpp
@@ -53,13 +54,26 @@ done
 [[ -d "$ENGINE_MAIN/cpp" ]] \
   || die "engine tree missing — run: (cd $ROOT/src && git submodule update --init --recursive)"
 [[ -d "$TESTS_DIR" ]] || die "engine C++ tests missing at $TESTS_DIR"
-for f in proj geos gdal libspatialite minizip nlohmann-json laszip googletest; do
+for f in proj geos gdal libspatialite minizip nlohmann-json laszip googletest libxml2; do
   brew list --versions "$f" >/dev/null 2>&1 \
     || die "brew formula missing: $f
-       → brew install proj geos gdal libspatialite laszip minizip nlohmann-json googletest"
+       → brew install proj geos gdal libspatialite laszip minizip nlohmann-json googletest libxml2"
 done
 
-log "preflight ok (root=$ROOT, -j$JOBS)"
+# GLES slot: the G0 no-op stub (default; CI has no ANGLE) or the ANGLE
+# runtime staged in dev/g2/angle-dist (install name @rpath/libGLESv2.dylib,
+# resolved via @loader_path once staged next to the engine in native-dist).
+GLES="${MACTAK_GLES:-stub}"
+ANGLE_DIST="$DEV/g2/angle-dist"
+case "$GLES" in
+  stub)  GLES_LIB="$WORK/gles-stub/libGLESv2.dylib"; GLES_RPATH="$WORK/gles-stub" ;;
+  angle) GLES_LIB="$ANGLE_DIST/libGLESv2.dylib";      GLES_RPATH="$ANGLE_DIST"
+         [[ -f "$GLES_LIB" && -f "$ANGLE_DIST/libEGL.dylib" ]] \
+           || die "MACTAK_GLES=angle but $ANGLE_DIST is not staged — run dev/g2/fetch-angle.sh" ;;
+  *)     die "MACTAK_GLES must be 'stub' or 'angle' (got '$GLES')" ;;
+esac
+
+log "preflight ok (root=$ROOT, -j$JOBS, GLES=$GLES)"
 
 # --- work tree -----------------------------------------------------------
 rm -rf "$WORK"
@@ -142,9 +156,16 @@ if(TARGET takengine)
     # — pin the full brew path so the whole process shares one sqlite.
     get_target_property(_libs takengine LINK_LIBRARIES)
     list(REMOVE_ITEM _libs las las_c charset GLESv2)
-    list(APPEND _libs ${WORK}/gles-stub/libGLESv2.dylib)
+    list(APPEND _libs @GLES_LIB@)
     list(APPEND _libs /opt/homebrew/opt/sqlite/lib/libsqlite3.dylib)
+    # libxml2 (KMLDriverDefinition2 style parsing): keg-only, full path =
+    # the same runtime libgdal already loads. The G0 stub used to no-op
+    # these 11 symbols silently (found when ANGLE replaced the stub).
+    list(APPEND _libs /opt/homebrew/opt/libxml2/lib/libxml2.dylib)
     set_target_properties(takengine PROPERTIES LINK_LIBRARIES "${_libs}")
+    set_target_properties(takengine PROPERTIES
+        BUILD_RPATH "@loader_path;@GLES_RPATH@"
+    )
 
     # ---------------------------------------------------------------
     # G1.0 canary: googletest subset of engine/src/test/cpp,
@@ -182,7 +203,7 @@ if(TARGET takengine)
     )
     target_link_libraries(takengine-tests PRIVATE takengine GTest::gtest_main)
     set_target_properties(takengine-tests PROPERTIES
-        BUILD_RPATH "${CMAKE_BINARY_DIR}/engine-cpp;${WORK}/gles-stub"
+        BUILD_RPATH "${CMAKE_BINARY_DIR}/engine-cpp;@GLES_RPATH@"
     )
 
     # ---------------------------------------------------------------
@@ -218,6 +239,9 @@ if(TARGET takengine)
     # macTAK shim: GDAL driver registration without the org.gdal SWIG
     # bindings (Android's path) — exposes the engine's GdalLibrary::init.
     list(APPEND _jni_kept ${SRC}/dev/g1/jni-extra/mactak_gdal.cpp)
+    # macTAK shim (G2): EGL render context on ANGLE, dlopen-based so it
+    # also builds in stub mode (init() just fails there).
+    list(APPEND _jni_kept ${SRC}/dev/g2/jni-extra/mactak_egl.cpp)
 
     add_library(takenginejni SHARED ${_jni_kept})
     target_compile_definitions(takenginejni PRIVATE ${takenginejni_DEFS}
@@ -246,17 +270,18 @@ if(TARGET takengine)
     )
     target_link_directories(takenginejni PRIVATE /opt/homebrew/lib)
     target_link_libraries(takenginejni PRIVATE takengine
-        ${WORK}/gles-stub/libGLESv2.dylib
+        @GLES_LIB@
         /opt/homebrew/opt/sqlite/lib/libsqlite3.dylib
         gdal
         minizip
     )
     set_target_properties(takenginejni PROPERTIES
-        BUILD_RPATH "${CMAKE_BINARY_DIR}/engine-cpp;${WORK}/gles-stub"
+        BUILD_RPATH "@loader_path;${CMAKE_BINARY_DIR}/engine-cpp;@GLES_RPATH@"
     )
 endif()
 CMAKE
 sed -e "s|@ROOT@|$ROOT|g" -e "s|@WORK@|$WORK|g" \
+    -e "s|@GLES_LIB@|$GLES_LIB|g" -e "s|@GLES_RPATH@|$GLES_RPATH|g" \
     "$WORK/wrapper-CMakeLists.txt.in" > "$WORK/CMakeLists.txt"
 rm "$WORK/wrapper-CMakeLists.txt.in"
 
@@ -285,7 +310,12 @@ log "canary 2/2: engine C++ tests (GTest)"
 log "staging → $OUT"
 cp "$WORK/cmake/engine-cpp/libtakengine.dylib" "$OUT/"
 cp "$WORK/cmake/libtakenginejni.dylib" "$OUT/"
-cp "$WORK/gles-stub/libGLESv2.dylib" "$OUT/libGLESv2-stub.dylib"
+rm -f "$OUT/libGLESv2-stub.dylib" "$OUT/libGLESv2.dylib" "$OUT/libEGL.dylib"
+if [[ "$GLES" == angle ]]; then
+  cp "$ANGLE_DIST/libEGL.dylib" "$ANGLE_DIST/libGLESv2.dylib" "$OUT/"   # @loader_path siblings
+else
+  cp "$WORK/gles-stub/libGLESv2.dylib" "$OUT/libGLESv2-stub.dylib"
+fi
 
 # --- canary --------------------------------------------------------------
 log "canary 3/3: JVM in-process load (JNI glue)"
@@ -293,6 +323,8 @@ nm -gU "$WORK/cmake/libtakenginejni.dylib" | grep 'Java_com_atakmap_database_imp
   || die "libtakenginejni.dylib is missing the DatabaseImpl JNI exports"
 nm -gU "$WORK/cmake/libtakenginejni.dylib" | grep 'Java_mactak_headless_NativeGdal_init' >/dev/null \
   || die "libtakenginejni.dylib is missing the macTAK GDAL-init shim (dev/g1/jni-extra)"
+nm -gU "$WORK/cmake/libtakenginejni.dylib" | grep 'Java_mactak_render_NativeEgl_init' >/dev/null \
+  || die "libtakenginejni.dylib is missing the macTAK EGL shim (dev/g2/jni-extra)"
 "$DEV/g1/smoke/run.sh" "$OUT"
 
 file "$OUT/libtakengine.dylib" "$OUT/libtakenginejni.dylib"

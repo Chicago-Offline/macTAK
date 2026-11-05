@@ -147,6 +147,84 @@ jobs:
             dev/g1/native-dist/takengine-tests.xml
           if-no-files-found: error
 
+  render-angle:
+    name: render on ANGLE/Metal (macOS arm64)
+    # G2: the engine's native renderer through ANGLE (EGL 1.5 / ES 3.0 on
+    # Metal) into an EGL pbuffer, driven from the JVM. ANGLE comes from the
+    # pinned Electron release (dev/g2/fetch-angle.sh, sha256-checked); the
+    # engine is rebuilt with MACTAK_GLES=angle in the GLES slot. The stub
+    # job above stays the engine gate; this proves the renderer contract.
+    needs: changes
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Check out macTAK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check out upstream ATAK CIV at the pinned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: deptofdefense/AndroidTacticalAssaultKit-CIV
+          ref: 889eee292c43d3d2eafdd1f2fbf378ad5cd89ecc # keep in sync with local src/ (docs/ci-qa.md)
+          path: src
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install engine dependencies (Homebrew)
+        if: needs.changes.outputs.changed == 'true'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: >
+          brew install cmake rsync proj geos gdal libspatialite minizip nlohmann-json laszip googletest libxml2
+          openssl@3 protobuf libmicrohttpd curl
+
+      - name: Set up Zulu 8 (arm64)
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: zulu
+          java-version: '8'
+          architecture: aarch64
+
+      - name: Stage ANGLE (pinned Electron release) + EGL/ES3 triangle smoke
+        if: needs.changes.outputs.changed == 'true'
+        env:
+          MACTAK_ANGLE_SOURCE: release
+        run: bash dev/g2/fetch-angle.sh && bash dev/g2/smoke/run.sh
+
+      - name: Build engine + glue with ANGLE in the GLES slot
+        if: needs.changes.outputs.changed == 'true'
+        env:
+          MACTAK_GLES: angle
+        run: bash dev/g1/build-native.sh
+
+      - name: Build comms stack (the single-JVM launcher needs both)
+        id: build-commo
+        if: needs.changes.outputs.changed == 'true'
+        run: bash dev/g1/build-commo.sh
+
+      - name: GLMapView → EGL pbuffer render smoke
+        if: needs.changes.outputs.changed == 'true'
+        env:
+          MACTAK_GL_DEBUG: '1'
+        run: bash dev/g2/render/run.sh --frames 10 --out dev/g2/build/render-smoke.ppm
+
+      - name: Offline layer canary on the ANGLE-linked engine
+        # both canaries report every run; only a failed build skips this one
+        if: ${{ !cancelled() && steps.build-commo.outcome == 'success' }}
+        run: bash dev/g1/headless/test/layer.sh
+
+      - name: Upload render artifacts
+        if: always() && needs.changes.outputs.changed == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: render-angle-macos-arm64
+          path: |
+            dev/g2/angle-dist/PROVENANCE.txt
+            dev/g2/build/render-smoke.ppm
+            hs_err_pid*.log
+          if-no-files-found: error
+
   commo-stack:
     name: comms stack (macOS arm64)
     needs: changes

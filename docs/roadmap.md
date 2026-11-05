@@ -30,6 +30,8 @@ Gate-gated plan. Each gate has: **objective → exit criteria (demo artifact) �
 
 ## G2 — Map renders in a native macOS window (2–3 mo) — *branch point*
 
+> **Status: M1 DONE (2026-11-04) — branch decided: H2.** ANGLE (EGL 1.5 + GL ES 3.0, Metal backend) fills the engine's GLES-stub link slot (`MACTAK_GLES=angle bash dev/g1/build-native.sh`); all 80 GL symbols the engine imports resolve against it (R2 retired). `GLMapView.render()` driven from a Zulu 8 JVM through a new `EglRenderContext` draws into an EGL pbuffer with zero GL errors at ~3–5 ms/frame (512², no layers) — `make test-render`. Three contract defects were ours, now patched: the G0 stub silently no-op'd libxml2; `renderer/GL.h` emitted desktop `#version 330` on macOS; `GLTerrainTile` enabled attribute `-1` on shader variants lacking it. Next (M2): window surface (`CAMetalLayer` → `eglCreateWindowSurface`) + basemap/vector content; R4 (AppKit vs JVM threading) is decided there. See `../dev/g2/NOTES.md`.
+
 **Objective:** The engine's map view composites into a native macOS window.
 
 - **Preferred (H2, native):** Swift/AppKit host, engine driven via JNI in-process or C++ API wrapped via Swift/C interop; render surface = **ANGLE on Metal** (ES 3 + EGL 1.5) occupying the engine's existing `GLES-stub` slot (`TE_GLES_VERSION=3` already set in `MacOSSources.cmake`). Evidence (2026-11-02): the shipped WinTAK itself renders through ANGLE/EGL — Pathway A gotcha #1: forcing ANGLE's D3D12 backend kills it while D3D11 works — so ANGLE-on-Metal mirrors the reference client's own desktop architecture, and the engine+ANGLE pairing (R2) is production-proven.
@@ -72,7 +74,7 @@ Reference evidence exists (2026-11-02): a full-display capture of the WinTAK gol
 | Risk | First stressed at | Mitigation if red |
 |---|---|---|
 | R1 engine won't compile arm64 | G0 | Rosetta x86_64 interim; re-score program |
-| R2 ANGLE≠GLES-stub contract mismatch | G2 | JOGL/H1 fallback — confidence raised: engine+ANGLE pairing proven in shipped WinTAK (renders via ANGLE/EGL, D3D11 backend) |
+| R2 ANGLE≠GLES-stub contract mismatch | G2 | **Retired 2026-11-04** (G2 M1): engine links + renders on ANGLE/Metal; the mismatches found were engine-side (GLSL version string, attribute `-1`) and are patched |
 | R3 gdal-2.4.4-mod won't build arm64 | G0 | Modern GDAL via Homebrew behind engine's `db`/`raster` SPIs |
 | R5 takRepo artifact credentials required | G0/G1 | Substitute from source builds (as CI does) |
 | R4 AppKit/JVM threading conflicts | G2 | Split-process design (headless engine + native UI over IPC) |

@@ -1,5 +1,16 @@
 # dev/g2 — G2: map renders in a native macOS window (ANGLE on Metal)
 
+## State (G2.2 — 2026-11-04): first map content — a GeoJSON FeatureLayer renders through the engine on ANGLE/Metal
+
+`make test-render` now renders `dev/g1/headless/test/fixtures/sf-landmarks.geojson`
+into the pbuffer: polygons (Golden Gate Park, Presidio, Alcatraz), the two
+bridge LineStrings through the engine's anti-aliased line shader, and point
+labels ("Ferry Building") through native `GLLabelManager` → Java2D glyphs.
+Zero GL errors. The Java-side engine (`GLBatchGeometryRenderer` et al.) runs
+against a **generated `android.opengl.GLES20/GLES30` → ANGLE JNI shim** and
+**Java2D-backed `android.graphics`** (`Bitmap`, `Canvas`, `Paint`, `Typeface`,
+`BitmapFactory`…). Section "G2.2" below.
+
 ## State (G2.1 — 2026-11-04): ANGLE occupies the GLES-stub slot; the engine's native renderer draws through it
 
 The G2 branch point (H2 native/ANGLE vs H1 Swing/JOGL) is **decided for H2**
@@ -14,7 +25,9 @@ the three contract issues found were on *our* side (below), not ANGLE's.
 ```sh
 make angle          # stage ANGLE → dev/g2/angle-dist, run EGL triangle smoke
 make build-angle    # engine + glue with ANGLE in the GLES slot (+ commo)
-make test-render    # GLGlobe → EGL pbuffer → readback, PASS/FAIL
+make test-render    # GLGlobe → EGL pbuffer → readback, bare + GeoJSON layer, PASS/FAIL
+# one-offs:
+bash dev/g2/render/run.sh --layer FILE.geojson --at 37.7955,-122.3937 --res 1 --out /tmp/f.png
 ```
 
 ## What's here
@@ -136,9 +149,9 @@ by path, gets `@loader_path` in its rpath, and `native-dist/` receives
 - Window surface: `CAMetalLayer` in an `NSView` → `eglCreateWindowSurface`;
   AppKit main thread vs JVM render thread (R4) decided here. Candidate:
   Swift/AppKit shell launching the JVM in-process via `libjli` (`JNI_CreateJavaVM`).
-- First pixels with content: basemap tiles + one `LayerStore` vector layer
-  (G1.3) through `GLMapView.setBaseMap` / layer renderers → needs
-  `android.graphics.Bitmap`/`BitmapFactory` runtime (CoreGraphics).
+- ~~First pixels with content~~ — done, G2.2 below. Still open: a **basemap**
+  (raster tiles) — `GLDatasetRasterLayer2` path, needs a local tile source
+  (MBTiles/GPKG raster fixture) since CI is offline.
 - Render goldens in CI (`ci-qa.md` tier 2): the pbuffer path is exactly the
   offscreen harness that plan assumed, and hosted `macos-26` already runs
   it on ANGLE/Metal (Apple Paravirtual device, ~170 ms/frame vs ~3–5 ms on
@@ -151,3 +164,86 @@ by path, gets `@loader_path` in its rpath, and `native-dist/` receives
   front/back tile sharing with real content.
 - Engine jar for a `macos` host source set (retire the shadow classes).
 - Build ANGLE from source at a pinned commit (retire the Electron source).
+
+## G2.2 — first map content: a GeoJSON FeatureLayer through the engine on ANGLE
+
+`dev/g2/render/run.sh --layer FILE` opens the file through the G1.3 feature
+stack (`LayerStore` → `PersistentDataSourceFeatureDataStore2`), wraps it in
+`FeatureLayer3` (via `Adapters.adapt`), adds it to the `Globe`, frames the
+camera on the store's bounds (`GLMapView.lookAt`) and renders until the
+asynchronous layer query has settled. PASS = zero GL errors **and**
+non-clear pixels. The default fixture gives Golden Gate Park / Presidio /
+Alcatraz polygons, the two bridges as anti-aliased lines, and a labelled
+point ("Ferry Building") drawn by native `GLLabelManager` through Java2D
+glyph rendering.
+
+### What's new
+
+| Path | Role |
+|---|---|
+| `gen-gles-shim.py` → `render/src/android/opengl/GLES20|GLES30.java` + `jni-extra/mactak_gles.c` | **Generated** runtime for `android.opengl.GLES20/30`: 342 JNI bodies forwarding to the linked `libGLESv2`, derived from `javap` of the transplant jar (API surface) × `gl3.h` prototypes (C types). Android `Buffer` semantics (direct or array-backed, `position`-relative), `(array, offset)` pairs, String in/out. 11 unused shapes are `UnsupportedOperationException` stubs — loud, not silent. |
+| `render/src/android/graphics/*` | Java2D-backed `Bitmap` (`BufferedImage TYPE_INT_ARGB`), `BitmapFactory`/`BitmapRegionDecoder` (ImageIO), `Canvas`, `Paint`, `Typeface`, `Color`, `Matrix` — exactly the 116 members the engine jar's bytecode references (extracted with `javap -c`). |
+| `render/src/android/opengl/GLUtils.java` | `texImage2D/texSubImage2D(Bitmap)` → RGBA8 upload through the shim. |
+| `render/src/android/util/{Pair,LruCache}.java` | Native `JNIPair_create` calls `Pair.create`; `FeatureStyleParser` uses `LruCache` (the G1.3 "Stub!" trap, now gone). |
+| `render/src/com/atakmap/map/AtakMapView.java` | Shadows the jar's jre stand-in: `getDefaultTextFormat()` returns `GLRenderGlobals`' default instead of throwing (point labels call it). |
+| `EglRenderContext extends GLMapSurface` | `GLMapView.getSurface()` casts the context to the abstract `GLMapSurface`; the async layer renderers call it. |
+| `../g1/patches/jni-renderable-draw-clears-exception.patch` | `ManagedGLMapRenderable2::draw` now reports + clears a Java exception thrown by a layer's `draw()` (trap 13). |
+| `LayerStore.dataStore()/bounds()` (G1.3) | For the layer + camera framing. |
+
+### Design decisions
+
+- **Generate the GLES binding, don't hand-write it.** The Android surface is
+  353 methods; the generator maps each to its C prototype by name, collapsing
+  `(T[] arr, int offset)` and `java.nio.Buffer` to one pointer and treating a
+  Java `int` where C wants a pointer as a buffer offset. Three shim-level
+  behaviours encode what Android drivers do and ANGLE/Metal does not: skip
+  attribute index `-1` (inactive attribute; `MACTAK_GL_DEBUG` dumps the Java
+  call site once), route integer-typed shader attributes through
+  `glVertexAttribIPointer`, and hand Metal the **signed** twin type for
+  signed `int` attributes fed with unsigned data (trap 12).
+- **Java2D, not CoreGraphics, for `android.graphics`.** The JDK ships a
+  complete headless 2D stack (fonts, antialiasing, ImageIO); upstream's own
+  desktop android-port takes the same route. CoreGraphics is the window-era
+  option if text quality or performance demands it.
+- **`EngineLibrary.initialize()` is called first, explicitly.** See trap 11
+  — nesting it inside native class-init deadlocks.
+
+### Traps found on the way (continuing G2 numbering, traps 11–15)
+
+11. **`ATAKMapEngineJNI_findClass` self-deadlock.** It holds a non-recursive
+    mutex while `FindClass` runs Java `<clinit>`s. `GLLayerFactory.register`
+    → `NativeGLLayerSpi2.wrap` → `Interop_class_init` → `findClass` →
+    `GLMapView.<clinit>` → `EngineLibrary.initialize` → `GLText.<clinit>` →
+    `setTextFormatFactory` (native) → `findClass` again → hang in
+    `PThreadsMutexImpl::lock` (found with `sample`, not `jstack` — the Java
+    side only shows RUNNABLE in a native method). Fix: the host calls
+    `EngineLibrary.initialize()` before any interop.
+12. **Metal is strict about integer vertex attributes.** `in int a_factor`
+    fed via `glVertexAttribPointer(GL_UNSIGNED_BYTE)` → ANGLE:
+    `CreateRenderPipelineState … Vertex attribute _ua_factor(7) of type int
+    cannot be read using MTLAttributeFormatUChar4`, the whole line pipeline
+    fails, GL_INVALID_OPERATION every frame. Needs `glVertexAttribIPointer`
+    **and** a signed format for a signed `int`. The Java engine renderer
+    does this in 3 places (fixed in the shim); the native
+    `GLBatchGeometryRenderer3/4` have the same pattern (`a_pattern`,
+    `a_factor`) — not on our path yet, patch when it is.
+13. **A pending Java exception poisons the rest of the native frame.**
+    `ManagedGLMapRenderable2::draw` called Java `draw()` without checking
+    for an exception; one layer threw (trap 14), the exception stayed
+    pending, every later JNI call in the frame returned `TE_Err`
+    (`ExceptionCheck()` true) — including the text-format factory — so
+    `GLText2_intern` returned null and `GLLabelManager::draw` dereferenced it
+    (`SIGSEGV GLText2::getTextFormat()+0x0`). The crash site was three
+    layers away from the cause. Patched: describe + clear after the call.
+14. **`AtakMapView.getDefaultTextFormat()` throws in the jar's jre class**
+    (`UnsupportedOperationException`); `GLBatchPoint$LabelState` calls it
+    for every labelled point. Shadowed.
+15. **`Layers.registerAll()` is the host's job.** Without it
+    `GLLayerFactory.create4` returns null and a `FeatureLayer3` is silently
+    never rendered — the frame stays black with no error anywhere. (ATAK's
+    `MapView` does it in its constructor.)
+
+### Known-benign noise
+
+- `[Unsafe]: Unsafe.allocateDirect lifetime management not supported` —
+  the JVM `Unsafe` falls back to plain `allocateDirect`; harmless here.

@@ -60,6 +60,32 @@ public final class LayerStore implements AutoCloseable {
         return ds.queryFeaturesCount(null);
     }
 
+    /** The store as a {@code FeatureDataStore}, e.g. to wrap in a {@code FeatureLayer} for rendering (G2). */
+    public com.atakmap.map.layer.feature.FeatureDataStore dataStore() {
+        return ds;
+    }
+
+    /** Union envelope of every feature geometry in the store, or null if empty. */
+    public Envelope bounds() {
+        Envelope out = null;
+        final FeatureCursor c = ds.queryFeatures(null);
+        try {
+            while (c.moveToNext()) {
+                final Geometry g = geometryOf(c);
+                if (g == null) continue;
+                final Envelope e = g.getEnvelope();
+                if (out == null) out = new Envelope(e.minX, e.minY, e.minZ, e.maxX, e.maxY, e.maxZ);
+                else {
+                    out.minX = Math.min(out.minX, e.minX); out.minY = Math.min(out.minY, e.minY);
+                    out.maxX = Math.max(out.maxX, e.maxX); out.maxY = Math.max(out.maxY, e.maxY);
+                }
+            }
+        } finally {
+            c.close();
+        }
+        return out;
+    }
+
     public int featureCount(File file) {
         final FeatureQueryParameters p = new FeatureQueryParameters();
         p.featureSetIds = featureSetIds(file);

@@ -203,11 +203,19 @@ jobs:
         if: needs.changes.outputs.changed == 'true'
         run: bash dev/g1/build-commo.sh
 
-      - name: GLMapView → EGL pbuffer render smoke
+      - name: GLMapView → EGL pbuffer render smoke (no layers)
         if: needs.changes.outputs.changed == 'true'
         env:
           MACTAK_GL_DEBUG: '1'
-        run: bash dev/g2/render/run.sh --frames 10 --out dev/g2/build/render-smoke.ppm
+        run: bash dev/g2/render/run.sh --frames 10 --out dev/g2/build/render-smoke.png
+
+      - name: Render the GeoJSON fixture (FeatureLayer3 → GLBatchGeometryRenderer on ANGLE)
+        # G2 M2: first map content — polygons, anti-aliased lines, labels via
+        # the Java2D-backed android.graphics shims; PASS requires content pixels.
+        if: needs.changes.outputs.changed == 'true'
+        env:
+          MACTAK_GL_DEBUG: '1'
+        run: bash dev/g2/render/run.sh --layer dev/g1/headless/test/fixtures/sf-landmarks.geojson --out dev/g2/build/render-layer.png
 
       - name: Offline layer canary on the ANGLE-linked engine
         # both canaries report every run; only a failed build skips this one
@@ -221,7 +229,8 @@ jobs:
           name: render-angle-macos-arm64
           path: |
             dev/g2/angle-dist/PROVENANCE.txt
-            dev/g2/build/render-smoke.ppm
+            dev/g2/build/render-smoke.png
+            dev/g2/build/render-layer.png
             hs_err_pid*.log
           if-no-files-found: error
 

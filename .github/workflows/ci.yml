@@ -186,6 +186,10 @@ jobs:
           java-version: '8'
           architecture: aarch64
 
+      - name: GLES shim drift gate (regenerate from transplant jar x gl3.h, diff against committed)
+        if: needs.changes.outputs.changed == 'true'
+        run: make check-gen-gles-shim
+
       - name: Stage ANGLE (pinned Electron release) + EGL/ES3 triangle smoke
         if: needs.changes.outputs.changed == 'true'
         env:

@@ -160,9 +160,10 @@ by path, gets `@loader_path` in its rpath, and `native-dist/` receives
 
 M1–M2.3 are landed: ANGLE in the GLES slot (PR #17, `90aa443`), a GeoJSON
 layer and an offline MBTiles basemap rendering beneath it (PR #18,
-`71fcbce`), CI green on both, review follow-ups filed as issue #19. The
-next gate is **M3, the window surface**; the rest is ordered roughly by
-when it bites.
+`71fcbce`), CI green on both; review follow-ups (issue #19) are landed in
+PR #21 — shim drift gate, cache eviction on `glDeleteProgram`, debug-path
+`FindClass` checks. The next gate is **M3, the window surface**; the rest
+is ordered roughly by when it bites.
 
 - **Window surface (M3 — next).** `CAMetalLayer` in an `NSView` →
   `eglCreateWindowSurface`; AppKit main thread vs JVM render thread (R4)
@@ -175,8 +176,11 @@ when it bites.
   - `GLMegaTexture::shareTile` has `other,shareWith = this;` (comma
     operator: sets `this->shareWith = this`, never `other.shareWith`), so
     after the first share every call from that megatexture returns
-    `TE_IllegalState`. Fix in the megatexture patch once front/back tile
-    sharing runs with real content (unchanged condition; keep it visible).
+    `TE_IllegalState`. Still open after G2.3 — the synthetic graticule
+    fixture never shares front/back tiles, and megatexture sharing is the
+    first thing large raster sets hit. Fix in the megatexture patch once
+    front/back tile sharing runs with real content (unchanged condition;
+    keep it visible).
   - `GLQuadTileNode4.resolveTexture` composites child textures with
     `uColor` set on whatever program happens to be current (G2.3
     known-benign noise) — bind `core.shader.handle` before compositing.
@@ -187,15 +191,19 @@ when it bites.
     shim) — patch when the native line renderer is on the path.
   Real imagery also re-opens trap 17 (the `org.gdal` JNI for
   `GdalTileReader` once a GeoTIFF raster is on the path).
-- **Shim/tooling debt (issue #19, next commit):** a `make gen-gles-shim`
-  target (+ CI regenerate-and-diff) so the four GENERATED artifacts can't
-  drift from the generator; invalidate the `uniformIsUnsigned` /
-  `attribIsInteger` caches on `glDeleteProgram` (GL program-ID reuse) or
-  at least note the never-delete assumption; null-check `FindClass` in the
-  two debug paths (`attribMinusOne`, `mactak_egl.cpp` KHR_debug);
+- **Shim/tooling debt (issue #19):** landed in PR #21 — a `make
+  gen-gles-shim` target plus a `make check-gen-gles-shim` CI drift gate so
+  the four GENERATED artifacts can't drift from the generator; cache
+  eviction on `glDeleteProgram` (GL reuses program ids; note programs
+  created and deleted by native engine code bypass the shim — they only
+  enter the cache if a Java GL call runs while one is current, which none
+  does today); `FindClass` null-checks in the two debug paths
+  (`attribMinusOne`, `mactak_egl.cpp` KHR_debug). Still open:
   `RenderSmoke.countNonClear`'s r,g,b < 8 black threshold vs. a future
-  dark basemap, and `--settle`'s 3000 ms wall-clock margin on slow hosted
-  runners.
+  dark basemap (the graticule fixture cannot trip it) — switch to a
+  sentinel-vs-cleared comparison or a luminance histogram when the first
+  dark imagery lands — and `--settle`'s 3000 ms wall-clock margin
+  (comfortable at 7–15 ms/frame; revisit if hosted runners slow down).
 - ~~First pixels with content~~ — done, G2.2 below. ~~Still open: a
   **basemap**~~ — done, G2.3 below (MBTiles raster fixture generated
   offline by the gdal CLI).
@@ -225,7 +233,7 @@ glyph rendering.
 
 | Path | Role |
 |---|---|
-| `gen-gles-shim.py` → `render/src/android/opengl/GLES20\|GLES30.java` + `jni-extra/mactak_gles.c` | **Generated** runtime for `android.opengl.GLES20/30`: 342 JNI bodies forwarding to the linked `libGLESv2`, derived from `javap` of the transplant jar (API surface) × `gl3.h` prototypes (C types). Android `Buffer` semantics (direct or array-backed, `position`-relative), `(array, offset)` pairs, String in/out. 11 unused shapes are `UnsupportedOperationException` stubs — loud, not silent. |
+| `gen-gles-shim.py` → `render/src/android/opengl/GLES20\|GLES30.java` + `jni-extra/mactak_gles.c` | **Generated** runtime for `android.opengl.GLES20/30`: 342 JNI bodies forwarding to the linked `libGLESv2`, derived from `javap` of the transplant jar (API surface) × `gl3.h` prototypes (C types). Android `Buffer` semantics (direct or array-backed, `position`-relative), `(array, offset)` pairs, String in/out. 11 unused shapes are `UnsupportedOperationException` stubs — loud, not silent. Regenerate with `make gen-gles-shim`; `make check-gen-gles-shim` (run by the `render-angle` CI job) fails on drift between generator and committed output. |
 | `render/src/android/graphics/*` | Java2D-backed `Bitmap` (`BufferedImage TYPE_INT_ARGB`), `BitmapFactory`/`BitmapRegionDecoder` (ImageIO), `Canvas`, `Paint`, `Typeface`, `Color`, `Matrix` — exactly the 116 members the engine jar's bytecode references (extracted with `javap -c`). |
 | `render/src/android/opengl/GLUtils.java` | `texImage2D/texSubImage2D(Bitmap)` → RGBA8 upload through the shim. |
 | `render/src/android/util/{Pair,LruCache}.java` | Native `JNIPair_create` calls `Pair.create`; `FeatureStyleParser` uses `LruCache` (the G1.3 "Stub!" trap, now gone). |

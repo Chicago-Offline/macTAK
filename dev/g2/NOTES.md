@@ -192,7 +192,7 @@ glyph rendering.
 
 | Path | Role |
 |---|---|
-| `gen-gles-shim.py` → `render/src/android/opengl/GLES20|GLES30.java` + `jni-extra/mactak_gles.c` | **Generated** runtime for `android.opengl.GLES20/30`: 342 JNI bodies forwarding to the linked `libGLESv2`, derived from `javap` of the transplant jar (API surface) × `gl3.h` prototypes (C types). Android `Buffer` semantics (direct or array-backed, `position`-relative), `(array, offset)` pairs, String in/out. 11 unused shapes are `UnsupportedOperationException` stubs — loud, not silent. |
+| `gen-gles-shim.py` → `render/src/android/opengl/GLES20\|GLES30.java` + `jni-extra/mactak_gles.c` | **Generated** runtime for `android.opengl.GLES20/30`: 342 JNI bodies forwarding to the linked `libGLESv2`, derived from `javap` of the transplant jar (API surface) × `gl3.h` prototypes (C types). Android `Buffer` semantics (direct or array-backed, `position`-relative), `(array, offset)` pairs, String in/out. 11 unused shapes are `UnsupportedOperationException` stubs — loud, not silent. |
 | `render/src/android/graphics/*` | Java2D-backed `Bitmap` (`BufferedImage TYPE_INT_ARGB`), `BitmapFactory`/`BitmapRegionDecoder` (ImageIO), `Canvas`, `Paint`, `Typeface`, `Color`, `Matrix` — exactly the 116 members the engine jar's bytecode references (extracted with `javap -c`). |
 | `render/src/android/opengl/GLUtils.java` | `texImage2D/texSubImage2D(Bitmap)` → RGBA8 upload through the shim. |
 | `render/src/android/util/{Pair,LruCache}.java` | Native `JNIPair_create` calls `Pair.create`; `FeatureStyleParser` uses `LruCache` (the G1.3 "Stub!" trap, now gone). |
@@ -221,38 +221,38 @@ glyph rendering.
 
 ### Traps found on the way (continuing G2 numbering, traps 11–15)
 
-11. **`ATAKMapEngineJNI_findClass` self-deadlock.** It holds a non-recursive
-    mutex while `FindClass` runs Java `<clinit>`s. `GLLayerFactory.register`
-    → `NativeGLLayerSpi2.wrap` → `Interop_class_init` → `findClass` →
-    `GLMapView.<clinit>` → `EngineLibrary.initialize` → `GLText.<clinit>` →
-    `setTextFormatFactory` (native) → `findClass` again → hang in
-    `PThreadsMutexImpl::lock` (found with `sample`, not `jstack` — the Java
-    side only shows RUNNABLE in a native method). Fix: the host calls
-    `EngineLibrary.initialize()` before any interop.
-12. **Metal is strict about integer vertex attributes.** `in int a_factor`
-    fed via `glVertexAttribPointer(GL_UNSIGNED_BYTE)` → ANGLE:
-    `CreateRenderPipelineState … Vertex attribute _ua_factor(7) of type int
-    cannot be read using MTLAttributeFormatUChar4`, the whole line pipeline
-    fails, GL_INVALID_OPERATION every frame. Needs `glVertexAttribIPointer`
-    **and** a signed format for a signed `int`. The Java engine renderer
-    does this in 3 places (fixed in the shim); the native
-    `GLBatchGeometryRenderer3/4` have the same pattern (`a_pattern`,
-    `a_factor`) — not on our path yet, patch when it is.
-13. **A pending Java exception poisons the rest of the native frame.**
-    `ManagedGLMapRenderable2::draw` called Java `draw()` without checking
-    for an exception; one layer threw (trap 14), the exception stayed
-    pending, every later JNI call in the frame returned `TE_Err`
-    (`ExceptionCheck()` true) — including the text-format factory — so
-    `GLText2_intern` returned null and `GLLabelManager::draw` dereferenced it
-    (`SIGSEGV GLText2::getTextFormat()+0x0`). The crash site was three
-    layers away from the cause. Patched: describe + clear after the call.
-14. **`AtakMapView.getDefaultTextFormat()` throws in the jar's jre class**
-    (`UnsupportedOperationException`); `GLBatchPoint$LabelState` calls it
-    for every labelled point. Shadowed.
-15. **`Layers.registerAll()` is the host's job.** Without it
-    `GLLayerFactory.create4` returns null and a `FeatureLayer3` is silently
-    never rendered — the frame stays black with no error anywhere. (ATAK's
-    `MapView` does it in its constructor.)
+1. **`ATAKMapEngineJNI_findClass` self-deadlock.** It holds a non-recursive
+   mutex while `FindClass` runs Java `<clinit>`s. `GLLayerFactory.register`
+   → `NativeGLLayerSpi2.wrap` → `Interop_class_init` → `findClass` →
+   `GLMapView.<clinit>` → `EngineLibrary.initialize` → `GLText.<clinit>` →
+   `setTextFormatFactory` (native) → `findClass` again → hang in
+   `PThreadsMutexImpl::lock` (found with `sample`, not `jstack` — the Java
+   side only shows RUNNABLE in a native method). Fix: the host calls
+   `EngineLibrary.initialize()` before any interop.
+2. **Metal is strict about integer vertex attributes.** `in int a_factor`
+   fed via `glVertexAttribPointer(GL_UNSIGNED_BYTE)` → ANGLE:
+   `CreateRenderPipelineState … Vertex attribute _ua_factor(7) of type int
+   cannot be read using MTLAttributeFormatUChar4`, the whole line pipeline
+   fails, GL_INVALID_OPERATION every frame. Needs `glVertexAttribIPointer`
+   **and** a signed format for a signed `int`. The Java engine renderer
+   does this in 3 places (fixed in the shim); the native
+   `GLBatchGeometryRenderer3/4` have the same pattern (`a_pattern`,
+   `a_factor`) — not on our path yet, patch when it is.
+3. **A pending Java exception poisons the rest of the native frame.**
+   `ManagedGLMapRenderable2::draw` called Java `draw()` without checking
+   for an exception; one layer threw (trap 14), the exception stayed
+   pending, every later JNI call in the frame returned `TE_Err`
+   (`ExceptionCheck()` true) — including the text-format factory — so
+   `GLText2_intern` returned null and `GLLabelManager::draw` dereferenced it
+   (`SIGSEGV GLText2::getTextFormat()+0x0`). The crash site was three
+   layers away from the cause. Patched: describe + clear after the call.
+4. **`AtakMapView.getDefaultTextFormat()` throws in the jar's jre class**
+   (`UnsupportedOperationException`); `GLBatchPoint$LabelState` calls it
+   for every labelled point. Shadowed.
+5. **`Layers.registerAll()` is the host's job.** Without it
+   `GLLayerFactory.create4` returns null and a `FeatureLayer3` is silently
+   never rendered — the frame stays black with no error anywhere. (ATAK's
+   `MapView` does it in its constructor.)
 
 ### Known-benign noise
 
@@ -283,37 +283,44 @@ Francisco. No network, no third-party imagery licence.
 | `gen-gles-shim.py`: `uniformIsUnsigned` | `glUniform1ui` on a non-`uint` uniform is redirected to `glUniform1i` (trap 20). |
 | `jni-extra/mactak_egl.cpp` | `MACTAK_GL_DEBUG=2` now dumps the **Java** stack next to the native backtrace — attributes a GL error to the engine call site in one run. |
 
-### Traps found on the way (traps 16–21)
+### Traps found on the way (traps 16–22)
 
-16. **`android.net.Uri` is `Stub!`** and `IOProviderFactory.createDatabase`
-    → `Uri.fromFile` runs on the first raster-store open. Re-implemented
-    (`parse/fromFile/getScheme/getPath/getHost/getQueryParameter/
-    getFragment/decode/Builder`).
-17. **`GdalTileReader.SPI` probes every URI** and the jar's `GdalTileReader`
-    binds the `org.gdal` Java bindings, which the transplant doesn't ship →
-    `UnsatisfiedLinkError` from inside the SPI chain for *any* dataset.
-    `Layers.registerAll()` registers it; the host unregisters it right after
-    (`TileReaderFactory.unregisterSpi(GdalTileReader.SPI)`). The engine's own
-    native GDAL (`NativeGdal`) is unaffected. Revisit when a GDAL-backed
-    raster (GeoTIFF) is on the path — that needs the `org.gdal` JNI, not a
-    shim.
-18. **`SystemClock.elapsedRealtime()` is a native method in the transplant**
-    (`UnsatisfiedLinkError`, not `Stub!`). Shadowed with `System.nanoTime()`.
-19. **`gov.tak.platform.commons.opengl.GLES20/30` in the port jar delegate to
-    JOGL** (`javax.media.opengl.GL`) → `NoClassDefFoundError` the first time
-    the raster renderer touches them (`GLQuadTileNode4` uses that package,
-    the feature renderer uses `android.opengl`). Shadowed as
-    `extends android.opengl.GLES20/30 implements GLES20Constants/…`.
-20. **`glUniform1ui` on a sampler/int uniform** — `GLQuadTileNode4` sets
-    `uTexture` with the unsigned variant; Android drivers accept it, ANGLE
-    raises `GL_INVALID_OPERATION` and the texture unit stays unset (black
-    tiles). The shim queries the active uniform type once per program and
-    routes non-`uint` uniforms to `glUniform1i`.
-21. **`gdalwarp` needs `-s_srs` for a PNG + world file.** The PNG driver
-    ignores a sidecar `.prj`; without `-s_srs EPSG:4326` the warp has no
-    source CRS and the MBTiles driver fails later with the misleading
-    `Could not find an appropriate zoom level` (there is no `ZOOM_LEVEL`
-    creation option to "fix" it with).
+1. **`android.net.Uri` is `Stub!`** and `IOProviderFactory.createDatabase`
+   → `Uri.fromFile` runs on the first raster-store open. Re-implemented
+   (`parse/fromFile/getScheme/getPath/getHost/getQueryParameter/
+   getFragment/decode/Builder`).
+2. **`GdalTileReader.SPI` probes every URI** and the jar's `GdalTileReader`
+   binds the `org.gdal` Java bindings, which the transplant doesn't ship →
+   `UnsatisfiedLinkError` from inside the SPI chain for *any* dataset.
+   `Layers.registerAll()` registers it; the host unregisters it right after
+   (`TileReaderFactory.unregisterSpi(GdalTileReader.SPI)`). The engine's own
+   native GDAL (`NativeGdal`) is unaffected. Revisit when a GDAL-backed
+   raster (GeoTIFF) is on the path — that needs the `org.gdal` JNI, not a
+   shim.
+3. **`SystemClock.elapsedRealtime()` is a native method in the transplant**
+   (`UnsatisfiedLinkError`, not `Stub!`). Shadowed with `System.nanoTime()`.
+4. **`gov.tak.platform.commons.opengl.GLES20/30` in the port jar delegate to
+   JOGL** (`javax.media.opengl.GL`) → `NoClassDefFoundError` the first time
+   the raster renderer touches them (`GLQuadTileNode4` uses that package,
+   the feature renderer uses `android.opengl`). Shadowed as
+   `extends android.opengl.GLES20/30 implements GLES20Constants/…`.
+5. **`glUniform1ui` on a sampler/int uniform** — `GLQuadTileNode4` sets
+   `uTexture` with the unsigned variant; Android drivers accept it, ANGLE
+   raises `GL_INVALID_OPERATION` and the texture unit stays unset (black
+   tiles). The shim queries the active uniform type once per program and
+   routes non-`uint` uniforms to `glUniform1i`.
+6. **`gdalwarp` needs `-s_srs` for a PNG + world file.** The PNG driver
+   ignores a sidecar `.prj`; without `-s_srs EPSG:4326` the warp has no
+   source CRS and the MBTiles driver fails later with the misleading
+   `Could not find an appropriate zoom level` (there is no `ZOOM_LEVEL`
+   creation option to "fix" it with).
+7. **The G0 GLES stub only covered what the *engine* linked** (80 symbols,
+   harvested from a failing link). The generated JNI shim references 240
+   `gl*` entry points, so every `MACTAK_GLES=stub` build — i.e. the two CI
+   jobs that don't stage ANGLE — failed at `libtakenginejni` link while
+   `render-angle` stayed green. `gen-gles-shim.py` now also emits
+   `jni-extra/mactak_gles_stub.c`, a typed no-op for all 246 `gl3.h`
+   prototypes; `build-native.sh` compiles that as the stub slot.
 
 ### Known-benign noise
 

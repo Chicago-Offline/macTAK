@@ -88,9 +88,10 @@ for p in "$DEV"/spike/g0/patches/gdal-drift-*.patch "$G1"/patches/*.patch; do
   log "  applied $(basename "$p")"
 done
 
-log "building GLES stub (throwaway; ANGLE replaces it at G2)"
+log "building GLES stub (no-op libGLESv2 covering all of gl3.h; ANGLE replaces it)"
 clang -arch arm64 -dynamiclib -O2 \
-  -o "$WORK/gles-stub/libGLESv2.dylib" "$DEV/spike/g0/gles-stub/stub.c"
+  -I"$ROOT/src/khronos/OpenGL/api" -I"$ROOT/src/khronos/EGL/api" \
+  -o "$WORK/gles-stub/libGLESv2.dylib" "$DEV/g2/jni-extra/mactak_gles_stub.c"
 
 log "tinygltf overlay (nlohmann-json stand-in)"
 mkdir -p "$WORK/overlay/tinygltf"

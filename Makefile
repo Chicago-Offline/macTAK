@@ -8,7 +8,7 @@ help:
 	@echo "  build-angle    - build native with ANGLE in the GLES slot (MACTAK_GLES=angle) + commo"
 	@echo "  test           - run smoke tests (dev/g1/smoke/run.sh)"
 	@echo "  test-roundtrip - run headless round-trip tests (dev/g1/headless/run.sh)"
-	@echo "  test-render    - G2 render smoke: engine GLGlobe into an EGL pbuffer on ANGLE (dev/g2/render/run.sh)"
+	@echo "  test-render    - G2 render smoke: engine GLGlobe into an EGL pbuffer on ANGLE, bare + GeoJSON layer + MBTiles basemap (dev/g2/render/run.sh)"
 	@echo "  lint           - shellcheck + bash -n over dev/**/*.sh; markdownlint/actionlint if installed"
 	@echo "  clean          - remove build outputs"
 
@@ -31,7 +31,10 @@ test-roundtrip:
 	bash dev/g1/headless/run.sh
 
 test-render:
-	bash dev/g2/render/run.sh
+	bash dev/g2/render/run.sh --out dev/g2/build/render-smoke.png
+	bash dev/g2/render/run.sh --layer dev/g1/headless/test/fixtures/sf-landmarks.geojson --out dev/g2/build/render-layer.png
+	bash dev/g2/fixtures/make-basemap.sh
+	bash dev/g2/render/run.sh --basemap dev/g2/build/fixtures/sf-graticule.mbtiles --layer dev/g1/headless/test/fixtures/sf-landmarks.geojson --out dev/g2/build/render-basemap.png
 
 lint:
 	@git ls-files -z 'dev/**/*.sh' | xargs -0 -n1 bash -n

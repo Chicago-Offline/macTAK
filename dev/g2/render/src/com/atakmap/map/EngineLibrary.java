@@ -67,6 +67,10 @@ public final class EngineLibrary {
         runtimeContext = new Context();
         GLRenderGlobals.appContext = runtimeContext;
 
+        // force GLText's static init: installs the default TextFormatFactory
+        // (native GLText2 dereferences it — SIGSEGV in getTextFormat() without)
+        com.atakmap.opengl.GLText.localize(null);
+
         DisplaySettings.setDpi(300f);
 
         Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {

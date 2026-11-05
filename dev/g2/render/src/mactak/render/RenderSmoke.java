@@ -1,13 +1,26 @@
 package mactak.render;
 
+import com.atakmap.coremap.maps.coords.GeoPoint;
 import com.atakmap.map.Globe;
+import com.atakmap.map.layer.Layers;
+import com.atakmap.map.layer.feature.Adapters;
+import com.atakmap.map.layer.feature.FeatureLayer3;
+import com.atakmap.map.layer.feature.geometry.Envelope;
+import com.atakmap.map.layer.raster.DatasetDescriptor;
+import com.atakmap.map.layer.raster.DatasetDescriptorFactory2;
+import com.atakmap.map.layer.raster.PersistentRasterDataStore;
+import com.atakmap.map.layer.raster.mobileimagery.MobileImageryRasterLayer2;
 import com.atakmap.map.opengl.GLMapView;
 
+import mactak.headless.LayerStore;
+
+import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -19,7 +32,12 @@ import java.util.List;
  * {@code GLMapView.render()} runs N frames; the engine's own clear must have
  * replaced the sentinel everywhere (the G0 stub would leave it untouched),
  * with zero GL errors. With no layers attached, the frame is the engine's
- * clear colour — this proves the GL path, not map content (that is G2.2).
+ * clear colour — this proves the GL path, not map content.
+ *
+ * <p>With {@code --layer FILE} (G2.2) the file is opened through the G1.3
+ * feature stack, wrapped in a {@code FeatureLayer}, added to the globe, and
+ * the camera framed on its bounds; PASS additionally requires non-clear
+ * pixels in the frame — the first map content on macOS.
  *
  * <p>Exit: 0 PASS, 1 FAIL, 2 usage/environment, 3 EGL init failed.
  */
@@ -28,19 +46,31 @@ public final class RenderSmoke {
     private static final String USAGE =
         "usage: RenderSmoke --lib PATH [--lib PATH ...] --egl PATH --gles PATH\n"
       + "                   [--size WxH] [--frames N] [--out FILE.ppm]\n"
+      + "                   [--layer FILE ...] [--layer-db DIR] [--res M_PER_PX] [--settle MS]\n"
       + "  --lib PATH    native library to System.load (repeatable, in order)\n"
       + "  --egl PATH    ANGLE libEGL.dylib (must sit beside the libGLESv2 the engine links)\n"
       + "  --gles PATH   ANGLE libGLESv2.dylib\n"
       + "  --size WxH    pbuffer size (default 512x512)\n"
       + "  --frames N    frames to render (default 5)\n"
-      + "  --out FILE    write the last frame as binary PPM\n";
+      + "  --out FILE    write the last frame (.png via ImageIO, else binary PPM)\n"
+      + "  --layer FILE  vector file to render (GeoJSON/GPKG/KML/SHP; repeatable)\n"
+      + "  --basemap F   raster basemap (MBTiles) rendered under the layers (repeatable)\n"
+      + "  --layer-db    feature store dir (default: temp)\n"
+      + "  --res M       camera resolution, metres/pixel (default: fit layer bounds)\n"
+      + "  --at LAT,LON  camera centre (default: layer bounds centre)\n"
+      + "  --settle MS   wall time to keep rendering while layers load (default 3000)\n";
 
     private RenderSmoke() { }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
         List<String> libs = new ArrayList<>();
-        String egl = null, gles = null, out = null;
+        List<File> layers = new ArrayList<>();
+        List<File> basemaps = new ArrayList<>();
+        String egl = null, gles = null, out = null, layerDb = null;
         int w = 512, h = 512, frames = 5;
+        long settleMs = 3000;
+        double res = Double.NaN;
+        double atLat = Double.NaN, atLon = Double.NaN;
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
                 case "--lib": libs.add(args[++i]); break;
@@ -48,6 +78,16 @@ public final class RenderSmoke {
                 case "--gles": gles = args[++i]; break;
                 case "--out": out = args[++i]; break;
                 case "--frames": frames = Integer.parseInt(args[++i]); break;
+                case "--layer": layers.add(new File(args[++i])); break;
+                case "--basemap": basemaps.add(new File(args[++i])); break;
+                case "--layer-db": layerDb = args[++i]; break;
+                case "--res": res = Double.parseDouble(args[++i]); break;
+                case "--at": {
+                    String[] ll = args[++i].split(",");
+                    atLat = Double.parseDouble(ll[0]); atLon = Double.parseDouble(ll[1]);
+                    break;
+                }
+                case "--settle": settleMs = Long.parseLong(args[++i]); break;
                 case "--size": {
                     String[] wh = args[++i].split("x");
                     w = Integer.parseInt(wh[0]); h = Integer.parseInt(wh[1]);
@@ -84,45 +124,146 @@ public final class RenderSmoke {
         }
 
         EglRenderContext ctx = new EglRenderContext(w, h, 128d);
+        // Initialise the engine BEFORE any native interop: ATAKMapEngineJNI_findClass
+        // holds a non-recursive mutex while FindClass runs Java <clinit>s, and
+        // GLMapView.<clinit> -> EngineLibrary.initialize -> GLText.<clinit> ->
+        // setTextFormatFactory re-enters findClass => self-deadlock.
+        com.atakmap.map.EngineLibrary.initialize();
+        // the host registers the SDK's GLLayer/GLStyle SPIs (ATAK's MapView does this)
+        Layers.registerAll();
+        // GdalTileReader is the org.gdal SWIG path (no bindings on macOS); it probes
+        // every tile URI first and throws UnsatisfiedLinkError on the GL worker.
+        com.atakmap.map.layer.raster.tilereader.TileReaderFactory.unregisterSpi(
+                com.atakmap.map.layer.raster.gdal.GdalTileReader.SPI);
         Globe globe = new Globe();
         GLMapView view = new GLMapView(ctx, globe, 0, 0, w, h);
+        ctx.setGLMapView(view);
         view.start();
+
+        // --basemap: MBTiles through the raster stack (TilesetLayerInfoSpi -> MBTilesTileReader ->
+        // BitmapFactory -> texture). Added first so it draws beneath the vector layers.
+        PersistentRasterDataStore rasterStore = null;
+        Envelope rasterBounds = null;
+        if (!basemaps.isEmpty()) {
+            if (layerDb == null) layerDb = Files.createTempDirectory("mactak-render-layers").toString();
+            File rasterDir = new File(layerDb, "raster");
+            rasterDir.mkdirs();
+            DatasetDescriptorFactory2.register(com.atakmap.android.maps.tilesets.TilesetLayerInfoSpi.INSTANCE);
+            rasterStore = new PersistentRasterDataStore(new File(rasterDir, "layers.sqlite"), rasterDir);
+            for (File f : basemaps) {
+                if (!f.isFile()) { System.err.println("render-smoke: no such basemap: " + f); System.exit(2); }
+                if (!rasterStore.add(f)) { System.err.println("render-smoke: FAIL: no raster provider accepted " + f.getName()); System.exit(1); }
+            }
+            com.atakmap.map.layer.raster.RasterDataStore.DatasetDescriptorCursor c = rasterStore.queryDatasets();
+            try {
+                while (c.moveToNext()) {
+                    DatasetDescriptor d = c.get();
+                    Envelope e = d.getCoverage(null).getEnvelope();
+                    System.out.printf("render-smoke: basemap %s type=%s provider=%s res [%.2f .. %.2f] m/px cov lat [%.4f, %.4f] lon [%.4f, %.4f]%n",
+                            d.getName(), d.getDatasetType(), d.getProvider(), d.getMaxResolution(null), d.getMinResolution(null), e.minY, e.maxY, e.minX, e.maxX);
+                    rasterBounds = rasterBounds == null ? new Envelope(e.minX, e.minY, 0, e.maxX, e.maxY, 0) : union(rasterBounds, e);
+                }
+            } finally {
+                c.close();
+            }
+            globe.addLayer(new MobileImageryRasterLayer2("mactak-basemap", rasterStore, null));
+        }
+
+        // --layer: G1.3 feature stack -> FeatureLayer -> globe; frame the camera on it.
+        LayerStore store = null;
+        Envelope frame = rasterBounds;
+        if (!layers.isEmpty()) {
+            if (layerDb == null) layerDb = Files.createTempDirectory("mactak-render-layers").toString();
+            store = new LayerStore(layerDb);
+            for (File f : layers) store.add(f);
+            Envelope b = store.bounds();
+            if (b == null) { System.err.println("render-smoke: FAIL: layer(s) have no geometry"); System.exit(1); }
+            System.out.printf("render-smoke: %d feature(s), bounds lat [%.5f, %.5f] lon [%.5f, %.5f]%n",
+                    store.featureCount(), b.minY, b.maxY, b.minX, b.maxX);
+            globe.addLayer(new FeatureLayer3("mactak-layer", Adapters.adapt(store.dataStore())));
+            frame = b;   // vector bounds win: that's what the fixture is about
+        }
+        if (frame != null) {
+            Envelope b = frame;
+            double clat = Double.isNaN(atLat) ? (b.minY + b.maxY) / 2 : atLat;
+            double clon = Double.isNaN(atLon) ? (b.minX + b.maxX) / 2 : atLon;
+            if (Double.isNaN(res)) {
+                // metres spanned by the bounds (+20% margin) over the pbuffer's smaller side
+                double mPerDegLat = 111320d, mPerDegLon = 111320d * Math.cos(Math.toRadians(clat));
+                double spanM = Math.max((b.maxY - b.minY) * mPerDegLat, (b.maxX - b.minX) * mPerDegLon) * 1.2;
+                res = Math.max(spanM / Math.min(w, h), 0.5);
+            }
+            view.lookAt(new GeoPoint(clat, clon), res, 0d, 0d, false);
+            System.out.printf("render-smoke: camera (%.5f, %.5f) @ %.2f m/px%n", clat, clon, res);
+        }
 
         int glErrors = 0;
         long t0 = System.nanoTime();
-        for (int i = 0; i < frames; i++) {
+        int rendered = 0;
+        // layers load asynchronously: keep pumping frames until settleMs has
+        // elapsed (and at least `frames` frames have run)
+        boolean hasContent = !layers.isEmpty() || !basemaps.isEmpty();
+        long deadline = System.currentTimeMillis() + (hasContent ? settleMs : 0);
+        for (int i = 0; i < frames || System.currentTimeMillis() < deadline; i++) {
             ctx.pump();
             view.render();
             NativeEgl.finish();
+            rendered++;
             int err;
             while ((err = NativeEgl.getGlError()) != 0) {
                 glErrors++;
-                System.err.printf("render-smoke: frame %d GL error 0x%04x%n", i, err);
+                if (glErrors <= 10) System.err.printf("render-smoke: frame %d GL error 0x%04x%n", i, err);
+            }
+            if (hasContent) {
+                try { Thread.sleep(16); } catch (InterruptedException e) { break; }
             }
         }
+        frames = rendered;
         double msPerFrame = (System.nanoTime() - t0) / 1e6 / frames;
 
         boolean readOk = NativeEgl.readPixels(px);
         long sentinel = countColour(px, w, h, 255, 0, 255);
+        long content = countNonClear(px, w, h);
         int cx = ((h / 2) * w + w / 2) * 4;
         System.out.printf("render-smoke: %d frames, %.1f ms/frame (incl. glFinish), glErrors=%d%n", frames, msPerFrame, glErrors);
-        System.out.printf("render-smoke: sentinel pixels left=%d/%d centre=(%d,%d,%d,%d)%n",
-                sentinel, (long) w * h, px.get(cx) & 0xff, px.get(cx + 1) & 0xff, px.get(cx + 2) & 0xff, px.get(cx + 3) & 0xff);
+        System.out.printf("render-smoke: sentinel pixels left=%d/%d content pixels=%d centre=(%d,%d,%d,%d)%n",
+                sentinel, (long) w * h, content, px.get(cx) & 0xff, px.get(cx + 1) & 0xff, px.get(cx + 2) & 0xff, px.get(cx + 3) & 0xff);
 
         if (out != null) {
-            try { writePpm(out, px, w, h); System.out.println("render-smoke: wrote " + out); }
-            catch (IOException e) { System.err.println("render-smoke: ppm write failed: " + e); }
+            try {
+                if (out.toLowerCase().endsWith(".png")) writePng(out, px, w, h); else writePpm(out, px, w, h);
+                System.out.println("render-smoke: wrote " + out);
+            } catch (IOException e) { System.err.println("render-smoke: image write failed: " + e); }
         }
 
         view.stop();
         view.release();
         globe.dispose();
+        if (store != null) store.close();
+        if (rasterStore != null) rasterStore.dispose();
         NativeEgl.release();
         NativeEgl.destroy();
 
-        boolean pass = readOk && glErrors == 0 && sentinel == 0;
+        boolean pass = readOk && glErrors == 0 && sentinel == 0 && (!hasContent || content > 0);
+        if (hasContent && content == 0) System.err.println("render-smoke: FAIL: layer attached but frame has no content pixels");
         System.out.println(pass ? "render-smoke: PASS" : "render-smoke: FAIL");
         System.exit(pass ? 0 : 1);
+    }
+
+    private static Envelope union(Envelope a, Envelope b) {
+        return new Envelope(Math.min(a.minX, b.minX), Math.min(a.minY, b.minY), 0, Math.max(a.maxX, b.maxX), Math.max(a.maxY, b.maxY), 0);
+    }
+
+    /** Pixels that are neither the sentinel nor the engine's black clear. */
+    private static long countNonClear(ByteBuffer px, int w, int h) {
+        long n = 0;
+        for (int i = 0; i < w * h * 4; i += 4) {
+            int r = px.get(i) & 0xff, g = px.get(i + 1) & 0xff, b = px.get(i + 2) & 0xff;
+            boolean black = r < 8 && g < 8 && b < 8;
+            boolean magenta = r == 255 && g == 0 && b == 255;
+            if (!black && !magenta) n++;
+        }
+        return n;
     }
 
     private static long countColour(ByteBuffer px, int w, int h, int r, int g, int b) {
@@ -131,6 +272,17 @@ public final class RenderSmoke {
             if ((px.get(i) & 0xff) == r && (px.get(i + 1) & 0xff) == g && (px.get(i + 2) & 0xff) == b) n++;
         }
         return n;
+    }
+
+    private static void writePng(String path, ByteBuffer px, int w, int h) throws IOException {
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        for (int y = 0; y < h; y++) {                      // GL rows are bottom-up
+            for (int x = 0; x < w; x++) {
+                int i = ((h - 1 - y) * w + x) * 4;
+                img.setRGB(x, y, ((px.get(i) & 0xff) << 16) | ((px.get(i + 1) & 0xff) << 8) | (px.get(i + 2) & 0xff));
+            }
+        }
+        if (!javax.imageio.ImageIO.write(img, "png", new File(path))) throw new IOException("no PNG writer");
     }
 
     private static void writePpm(String path, ByteBuffer px, int w, int h) throws IOException {

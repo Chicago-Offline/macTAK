@@ -56,13 +56,17 @@ for j in ${CP//:/ }; do
   [[ -f "$j" ]] || { echo "render/run.sh: missing jar: $j" >&2; exit 2; }
 done
 
-if [[ ! -d "$OUT" ]] || [[ -n "$(find "$HERE/src" -name '*.java' -newer "$OUT" -print -quit)" ]]; then
+if [[ ! -d "$OUT" ]] || [[ -n "$(find "$HERE/src" "$G1/headless/src" -name '*.java' -newer "$OUT" -print -quit)" ]]; then
   rm -rf "$OUT"; mkdir -p "$OUT"
-  find "$HERE/src" -name '*.java' -print0 | xargs -0 "$JDK/bin/javac" -source 8 -target 8 -Xlint:all -Werror -encoding UTF-8 \
+  # + dev/g1/headless/src: LayerStore/NativeGdal (G1.3) back the --layer option
+  find "$HERE/src" "$G1/headless/src" -name '*.java' -print0 | xargs -0 "$JDK/bin/javac" -source 8 -target 8 -Xlint:all -Werror -encoding UTF-8 \
     -classpath "$CP" -d "$OUT" \
     || { rm -rf "$OUT"; exit 1; }
   touch "$OUT"
 fi
+
+# GDAL_DATA for the engine's GdalLibrary::init (Homebrew gdal; override with GDAL_DATA).
+GDAL_DATA_DIR="${GDAL_DATA:-$(gdal-config --datadir 2>/dev/null || echo /opt/homebrew/opt/gdal/share/gdal)}"
 
 # $OUT first: it shadows com.atakmap.map.EngineLibrary (the jre/JOGL host
 # bootstrap in the engine jar) with the macOS one, and the android.* classes
@@ -80,6 +84,7 @@ fi
   -classpath "$OUT:$CP" \
   -Djava.library.path="$DIST" \
   -Djava.awt.headless=true \
+  -Dmactak.gdal.data="$GDAL_DATA_DIR" \
   -Dorg.slf4j.simpleLogger.defaultLogLevel="${MACTAK_LOG_LEVEL:-warn}" \
   mactak.render.RenderSmoke \
   --lib "$DIST/libtakengine.dylib" \

@@ -74,6 +74,7 @@ namespace {
     };
 
     Egl g;
+    JavaVM *g_vm = nullptr;
 
     void setError(const char *what) {
         std::snprintf(g.lastError, sizeof g.lastError, "%s (eglError=0x%04x)", what,
@@ -132,7 +133,7 @@ namespace {
         if (type == GL_DEBUG_TYPE_PERFORMANCE_KHR || type == GL_DEBUG_TYPE_OTHER_KHR) return;
         std::fprintf(stderr, "mactak_egl[GL_KHR_debug] src=0x%x type=0x%x id=%u sev=0x%x: %s\n",
                      source, type, id, severity, message ? message : "");
-        // MACTAK_GL_DEBUG=2: native backtrace for the first few errors
+        // MACTAK_GL_DEBUG=2: native backtrace + Java stack for the first few errors
         static int traced = 0;
         const char *v = std::getenv("MACTAK_GL_DEBUG");
         if (type == GL_DEBUG_TYPE_ERROR_KHR && v && std::atoi(v) >= 2 && traced < 6) {
@@ -140,6 +141,12 @@ namespace {
             void *frames[32];
             int n = backtrace(frames, 32);
             backtrace_symbols_fd(frames, n, 2);
+            JNIEnv *env = nullptr;
+            if (g_vm && g_vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) == JNI_OK && env) {
+                jclass thread = env->FindClass("java/lang/Thread");
+                jmethodID dump = thread ? env->GetStaticMethodID(thread, "dumpStack", "()V") : nullptr;
+                if (dump) env->CallStaticVoidMethod(thread, dump);
+            }
         }
     }
 
@@ -169,6 +176,7 @@ JNIEXPORT jboolean JNICALL Java_mactak_render_NativeEgl_init
 {
     if (g.dpy != EGL_NO_DISPLAY) { setError("already initialized"); return JNI_FALSE; }
     if (!jeglPath || !jglesPath || width <= 0 || height <= 0) { setError("bad arguments"); return JNI_FALSE; }
+    env->GetJavaVM(&g_vm);
 
     const char *eglPath = env->GetStringUTFChars(jeglPath, nullptr);
     const char *glesPath = env->GetStringUTFChars(jglesPath, nullptr);

@@ -21,7 +21,7 @@ Gate-gated plan. Each gate has: **objective → exit criteria (demo artifact) �
 
 **Objective:** JVM process on macOS: engine loads, offline map layer opens, CoT in/out via commoncommo.
 
-- Host = JVM (takkernel `java` target; `engine/src/jre` pattern). Comms via commoncommo JNI (or its ObjC bindings from Swift — decide here; JNI keeps one process, ObjC suits a split-process design later).
+- Host = JVM (takkernel `java` target; `engine/src/jre` pattern). Comms via commoncommo JNI (or its ObjC bindings from Swift — decide here; JNI keeps one process, ObjC suits a split-process design later). **Decided: JNI, one process** — G1 M2 built the commo JNI stack headless; M4 loads engine + comms in one JVM, which is what lets received CoT persist through the engine's `DatabaseImpl` JNI into the tracks DB.
 - Test: connect to FreeTAKServer (or `takproto`-aware peer), send/recv CoT, persist to the engine's tracks DB; `flighttactics/TAKTracker` as MIT-licensed protocol cross-reference.
 
 *Pre-validated 2026-11-02 (see `pathway-a.md` §FTS round-trip): the same FreeTAKServer container + Mac-side wiring this gate's nightly job will reuse already streams CoT both ways with the reference client as witness (WinTAK presence relayed to an independent listener; injected markers delivered back). Known traps for the integration job: the `vigsecdrone/freetakserver` image swaps port roles (8087 plaintext / 8089 SSL), FTS registers a client only after its first message (send a handshake), and zombie client sockets accumulate — restart the container between runs. The fallback branch also has a second proof beyond TAKTracker: a ~150-line stdlib Python CoT client (`../dev/reference/tools/`) performed the same witnessed round-trip.*

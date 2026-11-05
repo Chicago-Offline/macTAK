@@ -104,9 +104,10 @@ happy path when diagnosing).
 CI: `native-engine` gained only a Zulu-8 setup step (the build needs no
 JDK; the smoke does). `build-native.sh` still runs verbatim.
 
-## Follow-ups
+## Follow-ups (after G1.1)
 
-- `atak-headless` CLI skeleton (`--connect`) — next milestone; FTS
+- `atak-headless` CLI skeleton (`--connect`) — landed as G1.2 (below);
+  extended by G1.3 (`--layer`) and G1.4 (tracks DB + exit demo). FTS
   round-trip traps (port-role swap 8087/8089, handshake-before-
   registration, restart FTS container between runs) are catalogued in
   `dev/spike/g0/pathway-a.md`.

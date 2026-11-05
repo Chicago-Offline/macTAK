@@ -44,6 +44,32 @@ Caveat: upstream runs no tests and the corpus is modest — the harness (§6) ma
 
 Branch protection: Tier 1 statuses required to merge. During the spike itself `native-engine` is expected red — and that red is R1's scored signal, not an accident.
 
+### As-landed (2026-11-04)
+
+How the plan above actually materialized once G1 closed:
+
+- **Tier 1 (`ci.yml`)** runs `native engine`, `JVM tests (Zulu 8)`,
+  `comms stack`, and `lint` on hosted **`macos-26`** — the verified local
+  build needs Xcode 26, and `macos-14`'s Xcode 15 fails on old libc++ pair
+  constraints. The planned ubuntu-24.04 JVM matrix and the sccache /
+  clang-format / swiftlint tooling did not materialize; lint is actionlint +
+  shellcheck + `bash -n` (mirroring the pre-commit hook), and the
+  `setup-java` Gradle cache did land.
+- **`cot-roundtrip.yml`** is the hermetic two-client CoT round-trip against
+  `dev/g1/headless/fake-cot-server.py` on `dev/g1/**` PRs — Tier 2's
+  `engine-integration` pulled forward into the PR gate, no live
+  FreeTAKServer needed. Golden CoT fixtures (§7 phasing) remain future work.
+- **`supply-chain.yml`** (not in the plan above) pins CI's Homebrew set:
+  regenerated `Brewfile.lock.json` diff + `brew bundle check` + osv-scanner,
+  on `Brewfile`-touching PRs.
+- **Tier 2 nightly** (live-FTS `engine-integration`, render goldens, perf
+  budgets, pathway-a baseline) has not landed — it belongs to G2.
+- **Capacity:** hosted macOS arm64 runners can queue-starve a PR burst. On
+  2026-11-04 three Tier-1 jobs were cancelled after ~15 min in queue with
+  zero steps executed ("The job was not acquired by Runner of type hosted
+  even after multiple attempts"); rerunning just the failed jobs passed in
+  normal job times (1–10 min). Remedy: `gh run rerun <run-id> --failed`.
+
 ## 5. Self-hosted pattern — VMPal golden VMs
 
 The dev Mac also hosts the CI jobs that licensing forces there. VMPal's CI model maps onto GitHub Actions directly:

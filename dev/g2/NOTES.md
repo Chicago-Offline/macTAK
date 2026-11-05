@@ -156,25 +156,58 @@ by path, gets `@loader_path` in its rpath, and `native-dist/` receives
 - `GdalGraphicUtils.cpp:1205 -Wmismatched-new-delete` — upstream, pre-existing.
 - `[NativeFeatureDataStore2] leaked` in the layer canary — pre-existing (G1.3).
 
-## Follow-ups (G2.2+)
+## Follow-ups (G2.2+) — planning status after G2.3 (2026-11-05)
 
-- Window surface: `CAMetalLayer` in an `NSView` → `eglCreateWindowSurface`;
-  AppKit main thread vs JVM render thread (R4) decided here. Candidate:
-  Swift/AppKit shell launching the JVM in-process via `libjli` (`JNI_CreateJavaVM`).
-- ~~First pixels with content~~ — done, G2.2 below. ~~Still open: a **basemap**~~
-  — done, G2.3 below (MBTiles raster fixture generated offline by the gdal CLI).
+M1–M2.3 are landed: ANGLE in the GLES slot (PR #17, `90aa443`), a GeoJSON
+layer and an offline MBTiles basemap rendering beneath it (PR #18,
+`71fcbce`), CI green on both, review follow-ups filed as issue #19. The
+next gate is **M3, the window surface**; the rest is ordered roughly by
+when it bites.
+
+- **Window surface (M3 — next).** `CAMetalLayer` in an `NSView` →
+  `eglCreateWindowSurface`; AppKit main thread vs JVM render thread (R4)
+  decided here. Candidate: Swift/AppKit shell launching the JVM in-process
+  via `libjli` (`JNI_CreateJavaVM`). The EGL/GL stack above the surface
+  does not change (see "Pbuffer first, window second" above).
+- **Real imagery (G2.4) pulls three engine patches** — latent upstream
+  bugs documented but not yet exercised by the synthetic fixture, plus the
+  native line renderer's integer attributes:
+  - `GLMegaTexture::shareTile` has `other,shareWith = this;` (comma
+    operator: sets `this->shareWith = this`, never `other.shareWith`), so
+    after the first share every call from that megatexture returns
+    `TE_IllegalState`. Fix in the megatexture patch once front/back tile
+    sharing runs with real content (unchanged condition; keep it visible).
+  - `GLQuadTileNode4.resolveTexture` composites child textures with
+    `uColor` set on whatever program happens to be current (G2.3
+    known-benign noise) — bind `core.shader.handle` before compositing.
+    Same patch window; Android drivers hide both today, ANGLE surfaces
+    both.
+  - `GLBatchGeometryRenderer3/4` feed `in int` attributes through
+    `glVertexAttribPointer` (trap 12's pattern, already redirected in the
+    shim) — patch when the native line renderer is on the path.
+  Real imagery also re-opens trap 17 (the `org.gdal` JNI for
+  `GdalTileReader` once a GeoTIFF raster is on the path).
+- **Shim/tooling debt (issue #19, next commit):** a `make gen-gles-shim`
+  target (+ CI regenerate-and-diff) so the four GENERATED artifacts can't
+  drift from the generator; invalidate the `uniformIsUnsigned` /
+  `attribIsInteger` caches on `glDeleteProgram` (GL program-ID reuse) or
+  at least note the never-delete assumption; null-check `FindClass` in the
+  two debug paths (`attribMinusOne`, `mactak_egl.cpp` KHR_debug);
+  `RenderSmoke.countNonClear`'s r,g,b < 8 black threshold vs. a future
+  dark basemap, and `--settle`'s 3000 ms wall-clock margin on slow hosted
+  runners.
+- ~~First pixels with content~~ — done, G2.2 below. ~~Still open: a
+  **basemap**~~ — done, G2.3 below (MBTiles raster fixture generated
+  offline by the gdal CLI).
 - Render goldens in CI (`ci-qa.md` tier 2): the pbuffer path is exactly the
   offscreen harness that plan assumed, and hosted `macos-26` already runs
   it on ANGLE/Metal (Apple Paravirtual device, ~170 ms/frame vs ~3–5 ms on
-  an M-series — budget frame counts accordingly). A self-hosted runner is
-  only needed for speed, not for GL.
-- `GLMegaTexture::shareTile` has `other,shareWith = this;` (comma operator:
-  sets `this->shareWith = this`, never `other.shareWith`), so after the
-  first share every call from that megatexture returns `TE_IllegalState`.
-  Latent upstream bug; fix in the megatexture patch when G2.2 exercises
-  front/back tile sharing with real content.
+  an M-series — budget frame counts accordingly). CI uploads the frames as
+  artifacts today; a pixel-level golden diff is still open. A self-hosted
+  runner is only needed for speed, not for GL.
 - Engine jar for a `macos` host source set (retire the shadow classes).
-- Build ANGLE from source at a pinned commit (retire the Electron source).
+- Build ANGLE from source at a pinned commit (retire the Electron source;
+  roadmap has this at G5).
 
 ## G2.2 — first map content: a GeoJSON FeatureLayer through the engine on ANGLE
 

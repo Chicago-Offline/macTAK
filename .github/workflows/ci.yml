@@ -420,3 +420,29 @@ jobs:
           shellcheck "${scripts[@]}"
           for s in "${scripts[@]}"; do bash -n "$s"; done
           echo "lint OK: ${#scripts[@]} script(s)"
+
+      - name: python + powershell syntax (dev/reference/tools)
+        # Post-G0-audit coverage gap: lint covered dev/**/*.sh only, so a
+        # syntax error in the committed CoT witness rig surfaced mid-
+        # verification against a live server, not in CI. py_compile is
+        # stdlib; the PowerShell parser check catches capture.ps1 typos
+        # without running it (running it needs a VM display). pwsh ships on
+        # GitHub's ubuntu-24.04 image.
+        if: needs.changes.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          python3 -m py_compile dev/reference/tools/*.py
+          rm -rf dev/reference/tools/__pycache__
+          # shellcheck disable=SC2016  # the quoted string is PowerShell code, not shell
+          pwsh -NoProfile -Command '
+            $errs = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path "dev/reference/tools/capture.ps1").Path,
+              [ref]$null, [ref]$errs)
+            if ($errs -and $errs.Count -gt 0) {
+              $errs | ForEach-Object { Write-Error $_.Message }
+              exit 1
+            }
+            Write-Host "capture.ps1 parses OK"
+          '
+          echo "python + powershell lint OK"

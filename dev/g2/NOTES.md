@@ -1,5 +1,20 @@
 # dev/g2 — G2: map renders in a native macOS window (ANGLE on Metal)
 
+## State (M3.0 — 2026-11-06): the window surface is proven — `eglCreateWindowSurface` accepts a live `CAMetalLayer`
+
+`make smoke-window` runs the new window smoke
+(`dev/g2/smoke/egl-triangle-window.m`): an NSWindow with a layer-backed
+`CAMetalLayer` is ordered front, EGL 1.5 (Metal platform) takes it as a
+window surface (RGBA8 + D24S8), a GL ES 3.0 clear + triangle draws and
+reads back (centre/corner pixel probes, exact-size P6 PPM artifact), and
+a 3.0 s present loop runs at ~30 fps — zero GL errors, renderer
+"ANGLE (Apple, ANGLE Metal Renderer: <the box's Apple GPU>)". The gate
+fails loudly instead of passing silently on every way a window smoke can
+lie: unwritable or empty artifact (#39), stale post-teardown diagnostics
+(#38), 0 presented frames (#40), a nil Metal device (#42), unknown
+flags (#37), and the log claims only the time it actually spent (#41).
+Section "M3.0" below.
+
 ## State (G2.3 — 2026-11-05): an offline MBTiles basemap renders under the vector layer
 
 `make test-render` now also builds a synthetic graticule basemap
@@ -37,6 +52,7 @@ the three contract issues found were on *our* side (below), not ANGLE's.
 make angle          # stage ANGLE → dev/g2/angle-dist, run EGL triangle smoke
 make build-angle    # engine + glue with ANGLE in the GLES slot (+ commo)
 make test-render    # GLGlobe → EGL pbuffer → readback: bare, GeoJSON layer, MBTiles basemap, PASS/FAIL
+make smoke-window   # window-surface smoke (M3.0): NSWindow → CAMetalLayer → EGL surface → PASS
 # one-offs:
 bash dev/g2/render/run.sh --layer FILE.geojson --at 37.7955,-122.3937 --res 1 --out /tmp/f.png
 bash dev/g2/render/run.sh --basemap FILE.mbtiles --layer FILE.geojson --out /tmp/b.png
@@ -48,6 +64,7 @@ bash dev/g2/render/run.sh --basemap FILE.mbtiles --layer FILE.geojson --out /tmp
 |---|---|
 | `fetch-angle.sh` | Stages `libEGL.dylib` + `libGLESv2.dylib` (arm64-thinned, `@rpath` install names, ad-hoc re-signed) into `angle-dist/` with `PROVENANCE.txt`. Source: `$MACTAK_ANGLE_SRC`, else an installed Electron app's bundled ANGLE (VS Code by default). Downloads retry through transient release-CDN failures (504s). |
 | `smoke/egl-triangle.c` + `smoke/run.sh` | Pure C: Metal-platform display → pbuffer → ES3 context → shader → draw → readback. The "does ANGLE work on this box" gate, independent of the engine. |
+| `smoke/egl-triangle-window.m` + `smoke/run-window.sh` | ObjC++ (ARC): NSWindow → `CAMetalLayer` → `eglCreateWindowSurface` → triangle → readback → 3 s present loop. Proves the window-surface claim M3 leans on (M3.0); CI runs it compile-only, the dev Mac runs it live via `make smoke-window`. |
 | `jni-extra/mactak_egl.cpp` | `mactak.render.NativeEgl` — EGL context owner inside `libtakenginejni` (dlopen-based so stub-mode builds still link). `MACTAK_GL_DEBUG=1` installs a `GL_KHR_debug` callback; `=2` adds native backtraces for the first errors. |
 | `render/src/mactak/render/` | `EglRenderContext` (the `RenderContext`/`RenderSurface` over `NativeEgl`, counterpart of upstream's `JOGLRenderContext`), `RenderSmoke` (the canary). |
 | `render/src/com/atakmap/map/EngineLibrary.java` | macOS host bootstrap **shadowing** the engine jar's jre/JOGL one (see trap 4). |
@@ -526,3 +543,54 @@ first pixels and nothing else.
 AWT stays out (`java.awt.headless=true` remains); the split-process design
 stays shelved unless F1 *and* F2 both go red; G2.4 (real imagery, three
 engine patches) is the next milestone after M3 and separate.
+
+## M3.0 — the window-surface smoke (2026-11-06, #36)
+
+The M3 design's first de-risk step, executed: the one
+upstream-true-but-unproven claim — ANGLE's Metal backend accepts
+`eglCreateWindowSurface` on a live `CAMetalLayer` — is proven on this
+box. F1's trigger ("M3.0 red after ~a day") never fired; the IOSurface
+client-buffer fallback stays shelved.
+
+```sh
+make smoke-window                    # fetch-angle → pbuffer triangle → window smoke → PASS
+MACTAK_SMOKE_PPM=f.ppm bash dev/g2/smoke/run-window.sh  # artifact path (make sets dev/g2/build/window-smoke.ppm; unset = none)
+bash dev/g2/smoke/run-window.sh --compile-only          # what CI runs (no GUI session there)
+```
+
+### What the gate does
+
+`egl-triangle-window.m` (ObjC++, ARC): NSWindow with a layer-backed
+`CAMetalLayer` (1024×768 drawable px, backingScale 2.0),
+`makeKeyAndOrderFront` **before** the present loop, Metal-platform EGL
+display, config RGBA8 + D24S8, `eglCreateWindowSurface` on the layer,
+GL ES 3.0 clear + triangle, `glReadPixels` probes centre
+(255,128,0,255) and corner (0,0,64,255), exact-size P6 PPM write
+(16-byte header + W·H·3), then a 3.0 s present loop (~30 fps, 97 frames
+on this box) that ends early on Esc or window close. `run-window.sh`
+wraps it: flag parsing, artifact gate, PASS/FAIL on the binary's exit.
+
+### The gates — six review findings, each a way the smoke could lie
+
+Filed as #37–#42 in review of PR #36, fixed before merge:
+
+| Finding | Gate |
+|---|---|
+| #39 — a missing/empty artifact still passed | the binary exits 1 when the PPM can't be written or lands empty (`ppmOk` tracked across the write); the script refuses a 0-byte artifact too, as defense-in-depth |
+| #42 — a nil Metal device surfaced as a misleading "F1 trigger" | `MTLCreateSystemDefaultDevice()` probed at the top of `main`: exit 2 with a clear message, so a GPU-less machine reads as environment failure, not F1 |
+| #38 — a FAIL reported stale egl/gl errors | all judging (pixel probes, artifact, frame count) happens **before** EGL teardown — `fail()`'s `eglGetError`/`glGetError` read a live context; PASS alone is printed after teardown. Nuance: for a values-wrong failure both eras coincidentally report `EGL_SUCCESS`/`GL_NO_ERROR`; the era split shows when teardown itself fails |
+| #41 — the log claimed the full 3.0 s on early exit | the frame-count line reports the measured interval, not `SMOKE_SECONDS` |
+| #37 — unknown flags silently became the ANGLE dist dir | a `--*)` usage case names the bad option and exits 1 before any build or window |
+| #40 — a run whose window never became visible PASSed on 0 frames | `frames == 0` is a FAIL **regardless of cause** — the recorded decision (2026-11-06): keep-PASS-with-distinct-logging and the fail-only-if-never-visible hybrid were considered and passed over for the strictest gate; ending the run before the first frame presents is a failure, full stop. The header comment says so |
+
+Provenance: #39/#38/#41/#37/#40 are each proven at runtime with a forced
+negative (unwritable path; a sed-forced pixel FAIL exiting 1
+pre-teardown; a `SMOKE_SECONDS = 0.4` variant logging "in 0.4 s";
+`--compil-only`; a `BOOL quit = YES` variant exiting 1 with no PASS).
+The #42 nil path is proven by inspection only — no GPU-less machine
+here to run it on.
+
+CI compiles the window TU (`--compile-only`, in the render job); the
+live gate stays manual on the dev Mac — CI has no GUI session — with
+the PPM as its artifact. Next: M3.1, window natives + dynamic-size
+`EglRenderContext` (the pbuffer canary stays green throughout).

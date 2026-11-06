@@ -9,6 +9,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `make smoke-window` (M3.0): the G2 window-surface gate — an NSWindow
+  with a live `CAMetalLayer` becomes an ANGLE EGL window surface
+  (`eglCreateWindowSurface`, Metal platform), draws a GL ES 3.0
+  triangle, reads back centre/corner pixels into an exact-size P6 PPM
+  artifact, and presents for 3 s (~30 fps). CI compiles it
+  (`--compile-only`); the live run is manual on a GUI Mac. It fails
+  instead of lying: unwritable/empty artifact (#39), nil Metal device
+  exits 2 (#42), judging before EGL teardown so FAILs report live
+  diagnostics (#38), 0 presented frames is a FAIL regardless of cause
+  (#40 — decided strictest over log-only and hybrid options), unknown
+  flags get a usage line (#37), and the present loop logs its measured
+  duration (#41).
+
 - `atak-headless --datapackage FILE` resolves an ATAK data package instead of
   hand-feeding flags: CoT host:port from `preference.pref`'s `cot_streams`,
   the callsign, and the PKCS#12 pair extracted to a temp dir — explicit

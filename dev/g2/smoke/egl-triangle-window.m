@@ -274,6 +274,7 @@ int main(int argc, char **argv) {
     /* Present loop: redraw + swap each frame, pump the app's events by hand,
      * stop at the deadline or when the user closes the window / hits Esc. */
     NSTimeInterval deadline = [NSDate timeIntervalSinceReferenceDate] + SMOKE_SECONDS;
+    NSTimeInterval t0 = [NSDate timeIntervalSinceReferenceDate];   /* measured, not assumed (#41) */
     int frames = 0;
     BOOL quit = NO;
     while (!quit) {
@@ -296,7 +297,8 @@ int main(int argc, char **argv) {
         if (![win isVisible]) quit = YES;   /* closed (or hidden) by the user */
         if ([NSDate timeIntervalSinceReferenceDate] >= deadline) quit = YES;
     }
-    printf("egl-triangle-window: presented %d frame(s) in %.1f s\n", frames, (double)SMOKE_SECONDS);
+    printf("egl-triangle-window: presented %d frame(s) in %.1f s\n",
+           frames, [NSDate timeIntervalSinceReferenceDate] - t0);
 
     /* Judge the run before tearing EGL down: fail()'s diagnostics read
      * eglGetError/glGetError, which are meaningless after teardown (#38). */

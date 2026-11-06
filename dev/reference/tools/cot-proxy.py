@@ -56,9 +56,14 @@ def main():
     srv.bind(LOCAL_BIND)
     srv.listen(64)
     print("cot-proxy listening on %s -> %s" % (LOCAL_BIND, TARGET), flush=True)
-    while True:
-        client, addr = srv.accept()
-        threading.Thread(target=handle, args=(client,), daemon=True).start()
+    try:
+        while True:
+            client, addr = srv.accept()
+            threading.Thread(target=handle, args=(client,), daemon=True).start()
+    except KeyboardInterrupt:
+        print("\ncot-proxy stopped", flush=True)
+    finally:
+        srv.close()
 
 
 if __name__ == "__main__":

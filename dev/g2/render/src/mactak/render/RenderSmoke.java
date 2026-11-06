@@ -45,12 +45,15 @@ public final class RenderSmoke {
 
     private static final String USAGE =
         "usage: RenderSmoke --lib PATH [--lib PATH ...] --egl PATH --gles PATH\n"
-      + "                   [--size WxH] [--frames N] [--out FILE.ppm]\n"
+      + "                   [--size WxH] [--resize WxH] [--frames N] [--out FILE.ppm]\n"
       + "                   [--layer FILE ...] [--layer-db DIR] [--res M_PER_PX] [--settle MS]\n"
       + "  --lib PATH    native library to System.load (repeatable, in order)\n"
       + "  --egl PATH    ANGLE libEGL.dylib (must sit beside the libGLESv2 the engine links)\n"
       + "  --gles PATH   ANGLE libGLESv2.dylib\n"
       + "  --size WxH    pbuffer size (default 512x512)\n"
+      + "  --resize WxH  resize the surface mid-run (before the 2nd frame), the\n"
+      + "                M3.1 dynamic-size exercise; PASS requires the resize to\n"
+      + "                have gone through and the size-change listener to fire\n"
       + "  --frames N    frames to render (default 5)\n"
       + "  --out FILE    write the last frame (.png via ImageIO, else binary PPM)\n"
       + "  --layer FILE  vector file to render (GeoJSON/GPKG/KML/SHP; repeatable)\n"
@@ -70,6 +73,7 @@ public final class RenderSmoke {
         List<File> basemaps = new ArrayList<>();
         String egl = null, gles = null, out = null, layerDb = null;
         int w = 512, h = 512, frames = 5;
+        int resizeW = 0, resizeH = 0;
         long settleMs = 3000;
         double res = Double.NaN;
         double atLat = Double.NaN, atLon = Double.NaN;
@@ -93,6 +97,12 @@ public final class RenderSmoke {
                 case "--size": {
                     String[] wh = args[++i].split("x");
                     w = Integer.parseInt(wh[0]); h = Integer.parseInt(wh[1]);
+                    break;
+                }
+                case "--resize": {
+                    String[] wh = args[++i].split("x");
+                    resizeW = Integer.parseInt(wh[0]); resizeH = Integer.parseInt(wh[1]);
+                    if (resizeW <= 0 || resizeH <= 0) { System.err.print(USAGE); System.exit(2); }
                     break;
                 }
                 default: System.err.print(USAGE); System.exit(2);
@@ -126,6 +136,12 @@ public final class RenderSmoke {
         }
 
         EglRenderContext ctx = new EglRenderContext(w, h, 128d);
+        // Watch the event the engine itself consumes: GLMapView registers as
+        // the surface's OnSizeChangedListener host-side, so PASS can require
+        // the resize to have reached the engine, not just the EGL surface.
+        final int[] seenSize = { -1, -1 };
+        ctx.addOnSizeChangedListener((surface, nw, nh) -> { seenSize[0] = nw; seenSize[1] = nh; });
+        px = ctx.readbackBuffer();   // the context owns the readback from here on
         // Initialise the engine BEFORE any native interop: ATAKMapEngineJNI_findClass
         // holds a non-recursive mutex while FindClass runs Java <clinit>s, and
         // GLMapView.<clinit> -> EngineLibrary.initialize -> GLText.<clinit> ->
@@ -216,6 +232,17 @@ public final class RenderSmoke {
         for (int i = 0; i < frames || System.currentTimeMillis() < deadline
                 || (!contentSeen && System.currentTimeMillis() < cap); i++) {
             ctx.pump();
+            if (resizeW > 0 && rendered == 1) {       // mid-run resize (M3.1)
+                if (!ctx.resize(resizeW, resizeH)) {
+                    System.err.println("render-smoke: FAIL: resize refused: "
+                            + NativeEgl.getString(NativeEgl.STR_LAST_ERROR));
+                    System.exit(1);
+                }
+                px = ctx.readbackBuffer();            // re-ask: new size, new buffer
+                w = ctx.getWidth(); h = ctx.getHeight();
+                System.out.printf("render-smoke: resized to %dx%d, listener saw %dx%d%n",
+                        w, h, seenSize[0], seenSize[1]);
+            }
             view.render();
             NativeEgl.finish();
             rendered++;
@@ -256,7 +283,12 @@ public final class RenderSmoke {
         NativeEgl.release();
         NativeEgl.destroy();
 
-        boolean pass = readOk && glErrors == 0 && sentinel == 0 && (!hasContent || content > 0);
+        boolean resizeSeen = resizeW <= 0 || (seenSize[0] == resizeW && seenSize[1] == resizeH);
+        if (!resizeSeen)
+            System.err.println("render-smoke: FAIL: resize listener saw " + seenSize[0] + "x" + seenSize[1]
+                    + ", expected " + resizeW + "x" + resizeH);
+        boolean pass = readOk && glErrors == 0 && sentinel == 0 && resizeSeen
+                && (!hasContent || content > 0);
         if (hasContent && content == 0) System.err.println("render-smoke: FAIL: layer attached but frame has no content pixels");
         System.out.println(pass ? "render-smoke: PASS" : "render-smoke: FAIL");
         System.exit(pass ? 0 : 1);

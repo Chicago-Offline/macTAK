@@ -89,12 +89,70 @@ public final class HeadlessCLI {
         }
     }
 
+    /**
+     * G1.5: resolve an ATAK data package (DataPackage.java), extracting its
+     * PKCS#12 pair to a private temp dir. Failure prints the reason, exits 2.
+     *
+     * The dir and the extracted PKCS#12s never outlive this process:
+     * deleteOnExit covers every exit path (System.exit here and in main,
+     * SIGINT/SIGTERM) — the dir is registered first so its files, registered
+     * after, delete first (deleteOnExit is LIFO) — and a failed open() wipes
+     * the dir at once, so a mid-extraction failure leaves nothing either.
+     * kill -9 is the one exception, as with any temp cleanup.
+     */
+    private static DataPackage.Resolved resolveDataPackage(String dpPath) {
+        final File certDir;
+        try {
+            certDir = Files.createTempDirectory("mactak-dp-certs.").toFile();
+        } catch (IOException e) {
+            System.err.println("atak-headless: cannot use data package '"
+                    + dpPath + "': cannot create temp cert dir: " + e.getMessage());
+            System.exit(2);
+            return null;    // not reached
+        }
+        certDir.deleteOnExit();
+        final DataPackage.Resolved dpResolved;
+        try {
+            dpResolved = DataPackage.open(new File(dpPath), certDir);
+        } catch (IOException e) {
+            deleteTree(certDir);    // open() may have died mid-extraction
+            System.err.println("atak-headless: cannot use data package '"
+                    + dpPath + "': " + e.getMessage());
+            System.exit(2);
+            return null;    // not reached
+        }
+        if (dpResolved.certPath != null)
+            new File(dpResolved.certPath).deleteOnExit();
+        if (dpResolved.caPath != null)
+            new File(dpResolved.caPath).deleteOnExit();
+        System.out.println("headless: datapackage resolved " + dpResolved);
+        return dpResolved;
+    }
+
+    /**
+     * Best-effort recursive delete for the cert temp dir (it holds only the
+     * flat PKCS#12 files DataPackage wrote — no subdirs, no links); like any
+     * temp cleanup it must never mask the real error by throwing.
+     */
+    private static void deleteTree(File dir) {
+        File[] kids = dir.listFiles();
+        if (kids != null)
+            for (File kid : kids)
+                deleteTree(kid);
+        dir.delete();
+    }
+
     private static void usage(int code) {
         System.err.println(
                 "usage: atak-headless --connect host:port [--uid UID] [--callsign CS]\n" +
                 "                     [--duration SECONDS] [--send-marker LAT LON] [--db PATH]\n" +
                 "                     [--cert CLIENT.p12 --ca TRUSTSTORE.p12]   (SSL; passwords via\n" +
                 "                      MACTAK_CERT_PASS / MACTAK_CA_PASS, default 'atakatak')\n" +
+                "       atak-headless --datapackage FILE   (an ATAK data package: host:port\n" +
+                "                      from preference.pref's cot_streams, callsign, and the\n" +
+                "                      PKCS#12 pair extracted to a temp dir; --connect /\n" +
+                "                      --callsign / --cert + --ca override what it resolved,\n" +
+                "                      MACTAK_CERT_PASS overrides the package's cert password)\n" +
                 "       atak-headless --layer FILE [--layer FILE ...] [--layer-db DIR]\n" +
                 "                     [--expect-features N] [--quiet]");
         System.exit(code);
@@ -119,8 +177,8 @@ public final class HeadlessCLI {
         }
 
         String host = null, uid = "g1-headless-" + (System.nanoTime() % 1000000L),
-               callsign = "HEADLESS", markerLat = null, markerLon = null, dbPath = null,
-               certPath = null, caPath = null;
+               callsign = null, markerLat = null, markerLon = null, dbPath = null,
+               certPath = null, caPath = null, dpPath = null;
         int port = -1, duration = 15;
 
         for (int i = 0; i < args.length; i++) {
@@ -133,6 +191,10 @@ public final class HeadlessCLI {
                     host = hp[0];
                     try { port = Integer.parseInt(hp[1]); }
                     catch (NumberFormatException e) { usage(2); }
+                    // (#32) The same 1-65535 range the package path checks —
+                    // an out-of-range port dies at usage, not in an obscure
+                    // commo failure at connect.
+                    if (port < 1 || port > 65535) usage(2);
                     break;
                 case "--uid":       if (i + 1 >= args.length) usage(2);
                                     uid = args[++i]; break;
@@ -153,11 +215,29 @@ public final class HeadlessCLI {
                                     certPath = args[++i]; break;
                 case "--ca":        if (i + 1 >= args.length) usage(2);
                                     caPath = args[++i]; break;
+                case "--datapackage":
+                                    if (i + 1 >= args.length) usage(2);
+                                    dpPath = args[++i]; break;
                 default: usage(2);
             }
         }
-        if (host == null) usage(2);
+        if (host == null && dpPath == null) usage(2);
         if ((certPath == null) != (caPath == null)) usage(2);   // SSL needs both
+        // G1.5 precedence — explicit flags > data package > defaults, and
+        // MACTAK_CERT_PASS > the package's firecrypt Password > 'atakatak' —
+        // is one pure-data merge (ConnectOptions), asserted by the canary.
+        final DataPackage.Resolved dp =
+                dpPath == null ? null : resolveDataPackage(dpPath);
+        final ConnectOptions.Resolved opt = ConnectOptions.resolve(host, port,
+                callsign, certPath, caPath,
+                env("MACTAK_CERT_PASS", null), env("MACTAK_CA_PASS", null), dp);
+        host = opt.host;
+        port = opt.port;
+        callsign = opt.callsign;
+        certPath = opt.certPath;
+        caPath = opt.caPath;
+        final String certPass = opt.certPass;
+        final String caPass = opt.caPass;
 
         final AtomicInteger received = new AtomicInteger();
         final AtomicInteger persisted = new AtomicInteger();
@@ -241,8 +321,6 @@ public final class HeadlessCLI {
                     + " uid=" + uid + " callsign=" + callsign);
             // A client cert switches commo's streaming interface to SSL. Data-package
             // PKCS#12 is RC2-40: OpenSSL 3 needs its legacy provider (NativeSsl shim).
-            final String certPass = env("MACTAK_CERT_PASS", "atakatak");
-            final String caPass = env("MACTAK_CA_PASS", certPass);
             final byte[] clientCert = certPath == null ? null : readFile(certPath);
             final byte[] caCert = caPath == null ? null : readFile(caPath);
             if (clientCert != null && !NativeSsl.loadLegacyProvider())

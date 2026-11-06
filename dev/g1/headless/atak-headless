@@ -12,6 +12,10 @@
 #              through the engine's DatabaseImpl JNI into a sqlite tracks DB
 #              (--db PATH, else a private temp DB) and the latest fix per uid
 #              is printed on exit. Round-trip smoke: run.sh.
+#   --datapackage  comms: resolve an ATAK data package (.dp) — host:port from
+#              preference.pref's cot_streams, callsign, PKCS#12 pair to a
+#              temp dir — and connect like --connect (explicit flags win).
+#              Canary: test/datapackage.sh.
 #   --layer    engine: offline vector layer open via FeatureDataStore2.
 #              Canary: test/layer.sh.
 #
@@ -19,6 +23,7 @@
 #
 # usage: atak-headless --connect host:port [--uid UID] [--callsign CS]
 #                      [--duration SECONDS] [--send-marker LAT LON] [--db PATH]
+#        atak-headless --datapackage FILE
 #        atak-headless --layer FILE [--layer FILE ...] [--layer-db DIR]
 #                      [--expect-features N] [--quiet]
 set -euo pipefail

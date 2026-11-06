@@ -395,11 +395,54 @@ Continuing G1.3's numbering (these are traps 16–21):
   build-commo.sh > log` wrapper sees exit 143 even on success (the log ends
   with `comms stack OK`). Pre-existing.
 
+## G1.5 — the `--datapackage` importer
+
+`atak-headless --datapackage FILE.dp` resolves an ATAK data package instead
+of hand-feeding flags: `host:port[:proto]` from `preference.pref`'s
+`cot_streams` `address0`, the `location_units` callsign, and the PKCS#12
+pair (firecrypt `ClientFile`/`CAFile` when present, else the trust-named
+file and the other) extracted to a private temp dir. Precedence: explicit
+flags > package > defaults; `MACTAK_CERT_PASS` overrides the package's
+firecrypt `Password` (default `atakatak` unchanged). Failure → one line +
+exit 2.
+
+- `DataPackage.java` (+ `ConnectOptions.java`, the flag/package precedence
+  merge described above) is pure JDK (java.util.zip + DOM) — no natives — so
+  the canary (`test/datapackage.sh`, a step of the `jvm-tests` CI job)
+  compiles them with Zulu 8 and runs javac+java assertions against a
+  synthetic package (`test/fixtures/make-datapackage.sh`: openssl
+  self-signed p12s + pref XML; the recipe is committed, no binary fixture),
+  including every precedence rule. No JUnit, matching the repo idiom.
+- The launcher src is compile-gated in the same job (`test/compile-gate.sh`,
+  #29): atak-headless's own javac line (`-Xlint:all -Werror`, the same
+  mavenLocal-first/transplants-fallback classpath), with the commo API
+  classes javac'd from the checkout — CI previously never type-checked
+  `HeadlessCLI.java` at all.
+- Hardening matches the CoT side's posture: DOCTYPE disallowed and external
+  entities off when parsing `preference.pref` (XXE); zip entry names with
+  `..`, absolute paths or backslashes are refused before extraction
+  (Zip-Slip), and extraction targets are re-verified canonically under the
+  temp dir; every entry is size-capped while it is copied (#31) — 16 MiB for
+  `preference.pref`, 64 MiB per PKCS#12 — so an oversize fails with a
+  one-line `exceeds N bytes` message (exit 2) instead of filling the disk or
+  the heap, and a refused cert leaves no partial file in the cert dir; the
+  address line (#32) takes a bracketed IPv6 literal and stores it unbracketed
+  (what commo's addStreamingInterface takes), range-checks the port to
+  1–65535 on both the package and the `--connect` paths, matches the proto
+  token exactly (`ssl`/`tls`/`tcp`; `dtls` is refused instead of mislabeled
+  ssl), and refuses a client/truststore pair sharing one basename — the cert
+  dir keeps one flat file per basename, so the two could not coexist; the
+  resolved line never prints the password.
+- **The key names are verified against the fixture only, not yet against a
+  real OpenTAKServer package** (none existed on this machine). The parser is
+  deliberately liberal (`addressN`/`callsign` wherever they appear, firecrypt
+  by substring), but the first live-package run must confirm the
+  `cot_streams`/`location_units`/`plugin_firecrypt` spellings before this
+  replaces flag plumbing at a demo.
+
 ## Follow-ups (G1 done)
 
 - OTS upstream: `auto_delete` per-EUD queues; silent drop on callsign
   collision. Worth filing.
 - The `[commo-diag]` WARNING probes (patch 0001) are loud on every run; demote
   or gate behind `MACTAK_COMMO_DIAG` once the stack has been quiet for a while.
-- A data-package importer (`--datapackage ZIP` → host, port, certs,
-  passwords from `preference.pref`) is the obvious UX step toward G2.

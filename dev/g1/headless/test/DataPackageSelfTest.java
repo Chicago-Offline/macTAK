@@ -5,6 +5,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Arrays;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -173,6 +174,32 @@ public final class DataPackageSelfTest {
         msg = resolveMustFail(extra, new File(work, "d-extra"));
         check(msg != null && msg.contains("PKCS#12 pair"),
                 "unmatched extra p12 rejected: " + msg);
+
+        // --- size caps (#31): no unbounded entry reaches disk or heap ---
+        // The literals pin the contract. Real preference.pref files are a
+        // few KB and real PKCS#12s smaller still, so 16/64 MiB are generous;
+        // the padding compresses to nothing, keeping the fixtures tiny.
+        char[] prefPad = new char[17 * 1024 * 1024];
+        Arrays.fill(prefPad, ' ');
+        File bigPref = writeZip(new File(work, "bigpref.dp"),
+                "<preferences>" + new String(prefPad) + "</preferences>",
+                new String[0], new byte[0][]);
+        msg = resolveMustFail(bigPref, new File(work, "d-bigpref"));
+        check(msg != null && msg.contains("exceeds 16777216 bytes"),
+                "preference.pref past the 16 MiB cap refused: " + msg);
+
+        byte[] bigP12 = new byte[64 * 1024 * 1024 + 1];  // zeros deflate away
+        File bigCert = writeZip(new File(work, "bigcert.dp"), VALID_PREF,
+                new String[] {"certs/client.p12", "certs/truststore.p12"},
+                new byte[][] {bigP12, blob});
+        File dBigCert = new File(work, "d-bigcert");
+        msg = resolveMustFail(bigCert, dBigCert);
+        check(msg != null && msg.contains("exceeds 67108864 bytes"),
+                "PKCS#12 past the 64 MiB cap refused mid-copy: " + msg);
+        String[] left = dBigCert.list();
+        check(left != null && left.length == 0,
+                "refused oversized cert leaves no partial file: "
+                        + Arrays.toString(left));
 
         // --- plaintext variant: no certs, address without proto ---------
         String plain = "<preferences>"

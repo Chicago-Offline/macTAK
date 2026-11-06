@@ -68,8 +68,12 @@ import org.xml.sax.SAXParseException;
  * CoT side (DOCTYPE disallowed, external entities off); zip entry names never
  * reach {@link File} unchecked — traversal names ("..", absolute, backslash)
  * are refused outright (Zip-Slip) and extraction targets are re-verified
- * against {@code certDir} canonically; {@link Resolved}'s string never prints
- * the password.</p>
+ * against {@code certDir} canonically; every entry is size-capped while it is
+ * copied (#31) — {@code preference.pref} at 16 MiB, each PKCS#12 at 64 MiB —
+ * so an oversize (crafted or accidental) fails with a one-line message, exit
+ * 2, instead of filling the disk or OOMing the heap, and a refused cert
+ * leaves no partial file behind; {@link Resolved}'s string never prints the
+ * password.</p>
  *
  * <p>Pure JDK — no commo, no natives — so the importer is testable without
  * the engine: test/datapackage.sh.</p>
@@ -78,6 +82,12 @@ public final class DataPackage {
 
     private DataPackage() {
     }
+
+    /** Cap on preference.pref once decompressed: readAll holds it in memory. */
+    private static final int MAX_PREF_BYTES = 16 * 1024 * 1024;
+
+    /** Cap on one extracted PKCS#12: extract streams it straight to disk. */
+    private static final int MAX_CERT_BYTES = 64 * 1024 * 1024;
 
     /** One {@code <preference>} block of preference.pref: name + its entries. */
     private static final class Pref {
@@ -155,7 +165,7 @@ public final class DataPackage {
             ZipEntry prefEntry = zip.getEntry("preference.pref");
             if (prefEntry == null)
                 throw new IOException("no preference.pref in " + dp.getName());
-            prefs = parsePref(readAll(zip, prefEntry));
+            prefs = parsePref(readAll(zip, prefEntry, MAX_PREF_BYTES));
 
             // --- the PKCS#12 pair -----------------------------------------
             // firecrypt's ClientFile/CAFile name them explicitly when present;
@@ -266,9 +276,21 @@ public final class DataPackage {
         try (InputStream in = zip.getInputStream(entry);
              FileOutputStream out = new FileOutputStream(target)) {
             byte[] buf = new byte[8192];
+            long total = 0;
             int n;
-            while ((n = in.read(buf)) > 0)
+            while ((n = in.read(buf)) > 0) {
+                total += n;
+                if (total > MAX_CERT_BYTES)
+                    throw new IOException(name + " exceeds "
+                            + MAX_CERT_BYTES + " bytes");
                 out.write(buf, 0, n);
+            }
+        } catch (IOException e) {
+            // The cap (or a real write error) must not leave a partial
+            // PKCS#12 in certDir. Best-effort delete, then let the message
+            // travel: no deleteOnExit — the JVM outlives this by minutes.
+            target.delete();
+            throw e;
         }
         return target;
     }
@@ -345,13 +367,23 @@ public final class DataPackage {
         return prefs;
     }
 
-    private static String readAll(ZipFile zip, ZipEntry entry) throws IOException {
+    /** Slurp an entry fully, refusing anything past limit (#31): an
+     * oversized preference.pref would OOM the JVM mid-read, before the
+     * clean-error path had a chance to run. */
+    private static String readAll(ZipFile zip, ZipEntry entry, int limit)
+            throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (InputStream in = zip.getInputStream(entry)) {
             byte[] buf = new byte[8192];
+            int total = 0;
             int n;
-            while ((n = in.read(buf)) > 0)
+            while ((n = in.read(buf)) > 0) {
+                total += n;
+                if (total > limit)
+                    throw new IOException(entry.getName() + " exceeds "
+                            + limit + " bytes");
                 out.write(buf, 0, n);
+            }
         }
         return new String(out.toByteArray(), StandardCharsets.UTF_8);
     }

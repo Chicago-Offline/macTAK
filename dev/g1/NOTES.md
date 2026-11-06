@@ -422,7 +422,11 @@ exit 2.
   entities off when parsing `preference.pref` (XXE); zip entry names with
   `..`, absolute paths or backslashes are refused before extraction
   (Zip-Slip), and extraction targets are re-verified canonically under the
-  temp dir; the resolved line never prints the password.
+  temp dir; every entry is size-capped while it is copied (#31) — 16 MiB for
+  `preference.pref`, 64 MiB per PKCS#12 — so an oversize fails with a
+  one-line `exceeds N bytes` message (exit 2) instead of filling the disk or
+  the heap, and a refused cert leaves no partial file in the cert dir; the
+  resolved line never prints the password.
 - **The key names are verified against the fixture only, not yet against a
   real OpenTAKServer package** (none existed on this machine). The parser is
   deliberately liberal (`addressN`/`callsign` wherever they appear, firecrypt

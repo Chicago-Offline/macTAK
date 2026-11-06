@@ -196,6 +196,14 @@ jobs:
           MACTAK_ANGLE_SOURCE: release
         run: bash dev/g2/fetch-angle.sh && bash dev/g2/smoke/run.sh
 
+      - name: Window-surface smoke — compile-only gate (the run is manual, it opens a window)
+        # G2 M3.0: NSWindow → CAMetalLayer → eglCreateWindowSurface is the
+        # window path the pbuffer smoke doesn't cover; CI runners have no
+        # WindowServer session, so the run itself stays a dev-Mac manual gate
+        # (`make smoke-window`), with the readback PPM as its artifact.
+        if: needs.changes.outputs.changed == 'true'
+        run: bash dev/g2/smoke/run-window.sh --compile-only
+
       - name: Build engine + glue with ANGLE in the GLES slot
         if: needs.changes.outputs.changed == 'true'
         env:

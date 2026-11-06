@@ -587,8 +587,8 @@ Provenance: #39/#38/#41/#37/#40 are each proven at runtime with a forced
 negative (unwritable path; a sed-forced pixel FAIL exiting 1
 pre-teardown; a `SMOKE_SECONDS = 0.4` variant logging "in 0.4 s";
 `--compil-only`; a `BOOL quit = YES` variant exiting 1 with no PASS).
-#42's nil path is proven by inspection only — no GPU-less machine here
-to run it on.
+The #42 nil path is proven by inspection only — no GPU-less machine
+here to run it on.
 
 CI compiles the window TU (`--compile-only`, in the render job); the
 live gate stays manual on the dev Mac — CI has no GUI session — with

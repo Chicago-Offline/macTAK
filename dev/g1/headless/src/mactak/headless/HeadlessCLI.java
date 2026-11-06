@@ -178,7 +178,7 @@ public final class HeadlessCLI {
 
         String host = null, uid = "g1-headless-" + (System.nanoTime() % 1000000L),
                callsign = null, markerLat = null, markerLon = null, dbPath = null,
-               certPath = null, caPath = null, dpPath = null, dpCertPass = null;
+               certPath = null, caPath = null, dpPath = null;
         int port = -1, duration = 15;
 
         for (int i = 0; i < args.length; i++) {
@@ -219,24 +219,21 @@ public final class HeadlessCLI {
         }
         if (host == null && dpPath == null) usage(2);
         if ((certPath == null) != (caPath == null)) usage(2);   // SSL needs both
-        // G1.5: an ATAK data package fills in whatever the flags left unset
-        // (explicit flags win); MACTAK_CERT_PASS overrides its password, below.
-        if (dpPath != null) {
-            DataPackage.Resolved dp = resolveDataPackage(dpPath);
-            if (host == null) {
-                host = dp.host;
-                port = dp.port;
-            }
-            if (callsign == null && dp.callsign != null)
-                callsign = dp.callsign;
-            if (certPath == null) {
-                certPath = dp.certPath;
-                caPath = dp.caPath;
-            }
-            dpCertPass = dp.certPass;
-        }
-        if (callsign == null)
-            callsign = "HEADLESS";
+        // G1.5 precedence — explicit flags > data package > defaults, and
+        // MACTAK_CERT_PASS > the package's firecrypt Password > 'atakatak' —
+        // is one pure-data merge (ConnectOptions), asserted by the canary.
+        final DataPackage.Resolved dp =
+                dpPath == null ? null : resolveDataPackage(dpPath);
+        final ConnectOptions.Resolved opt = ConnectOptions.resolve(host, port,
+                callsign, certPath, caPath,
+                env("MACTAK_CERT_PASS", null), env("MACTAK_CA_PASS", null), dp);
+        host = opt.host;
+        port = opt.port;
+        callsign = opt.callsign;
+        certPath = opt.certPath;
+        caPath = opt.caPath;
+        final String certPass = opt.certPass;
+        final String caPass = opt.caPass;
 
         final AtomicInteger received = new AtomicInteger();
         final AtomicInteger persisted = new AtomicInteger();
@@ -320,11 +317,6 @@ public final class HeadlessCLI {
                     + " uid=" + uid + " callsign=" + callsign);
             // A client cert switches commo's streaming interface to SSL. Data-package
             // PKCS#12 is RC2-40: OpenSSL 3 needs its legacy provider (NativeSsl shim).
-            // G1.5 precedence: MACTAK_CERT_PASS over the data package's
-            // firecrypt Password over the built-in default.
-            final String certPass = env("MACTAK_CERT_PASS",
-                    dpCertPass != null ? dpCertPass : "atakatak");
-            final String caPass = env("MACTAK_CA_PASS", certPass);
             final byte[] clientCert = certPath == null ? null : readFile(certPath);
             final byte[] caCert = caPath == null ? null : readFile(caPath);
             if (clientCert != null && !NativeSsl.loadLegacyProvider())

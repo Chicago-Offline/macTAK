@@ -367,6 +367,26 @@ jobs:
         if: needs.changes.outputs.changed == 'true'
         run: bash dev/g1/headless/test/datapackage.sh
 
+      - name: Compile-only gate for the headless launcher src
+        # #29: nothing above type-checked dev/g1/headless/src — the launcher
+        # javacs itself at launch (atak-headless), so HeadlessCLI.java and the
+        # --datapackage precedence block compiled on contributor machines
+        # alone. Same contract, still no natives: the commo API classes are
+        # javac'd from this checkout (exactly the sources build-commo.sh
+        # seeds jcommoncommo.jar with), then test/compile-gate.sh runs the
+        # launcher's own compile line (Zulu 8, -Xlint:all -Werror, the same
+        # mavenLocal-first/transplants-fallback classpath).
+        if: needs.changes.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          commo_api="$RUNNER_TEMP/commo-api-classes"
+          mkdir -p "$commo_api"
+          find src/commoncommo/jni/com/atakmap/commoncommo -maxdepth 1 \
+            -name '*.java' ! -name 'InternalNativeInitializer.java' \
+            > "$RUNNER_TEMP/commo-api-srcs.txt"
+          javac -d "$commo_api" @"$RUNNER_TEMP/commo-api-srcs.txt"
+          bash dev/g1/headless/test/compile-gate.sh "$commo_api"
+
   lint:
     name: lint (shell + workflows)
     needs: changes

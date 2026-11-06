@@ -189,6 +189,61 @@ public final class DataPackageSelfTest {
                 "plaintext dp yields no certs");
         check(p.certPass == null, "plaintext dp yields no certPass");
 
+        // --- --datapackage precedence: flags > package > defaults ------
+        // ConnectOptions.resolve is the merge HeadlessCLI runs (moved there
+        // so the canary can assert it, #29). The fixture package r (SSL,
+        // DP-UNIT, dp-cert-pass) and the plaintext p (no certs, callsign or
+        // password) cover both shapes; pure data, no files touched.
+        ConnectOptions.Resolved m = ConnectOptions.resolve(
+                null, -1, null, null, null, null, null, r);
+        check("dp.example.test".equals(m.host) && m.port == 8089,
+                "package fills unset --connect");
+        check(expectCallsign != null && expectCallsign.equals(m.callsign),
+                "package callsign used when no --callsign");
+        check(r.certPath.equals(m.certPath) && r.caPath.equals(m.caPath),
+                "package cert pair used when no --cert/--ca");
+        check("dp-cert-pass".equals(m.certPass) && m.certPass.equals(m.caPass),
+                "package Password used when no env override");
+
+        m = ConnectOptions.resolve("flag.example.test", 9999, "FLAG-CS",
+                "/flag/client.p12", "/flag/truststore.p12", null, null, r);
+        check("flag.example.test".equals(m.host) && m.port == 9999,
+                "explicit --connect beats the package");
+        check("FLAG-CS".equals(m.callsign),
+                "explicit --callsign beats the package");
+        check("/flag/client.p12".equals(m.certPath)
+                        && "/flag/truststore.p12".equals(m.caPath),
+                "explicit --cert/--ca beat the package");
+        check("dp-cert-pass".equals(m.certPass),
+                "package Password still applies with explicit certs");
+
+        m = ConnectOptions.resolve(null, -1, null, null, null,
+                "env-cert", "env-ca", r);
+        check("env-cert".equals(m.certPass),
+                "MACTAK_CERT_PASS beats the package Password");
+        check("env-ca".equals(m.caPass),
+                "MACTAK_CA_PASS beats the mirrored certPass");
+
+        m = ConnectOptions.resolve(null, -1, null, null, null,
+                "env-only", null, r);
+        check("env-only".equals(m.certPass) && "env-only".equals(m.caPass),
+                "caPass mirrors certPass without MACTAK_CA_PASS");
+
+        m = ConnectOptions.resolve(null, -1, null, null, null, null, null, p);
+        check("HEADLESS".equals(m.callsign),
+                "callsign defaults to HEADLESS when nothing names one");
+        check("atakatak".equals(m.certPass) && "atakatak".equals(m.caPass),
+                "password default atakatak when no package Password/env");
+        check(m.certPath == null && m.caPath == null,
+                "plaintext package leaves the cert pair unset");
+
+        m = ConnectOptions.resolve(null, -1, null, null, null, null, null,
+                null);
+        check(m.host == null && m.port == -1,
+                "no package keeps --connect unset (usage(2) guards it)");
+        check("HEADLESS".equals(m.callsign) && "atakatak".equals(m.certPass),
+                "no package: callsign and password defaults still apply");
+
         if (failures == 0) {
             System.out.println("datapackage-selftest: ALL PASS");
             return true;

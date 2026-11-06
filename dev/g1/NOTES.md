@@ -406,12 +406,18 @@ flags > package > defaults; `MACTAK_CERT_PASS` overrides the package's
 firecrypt `Password` (default `atakatak` unchanged). Failure → one line +
 exit 2.
 
-- `DataPackage.java` is pure JDK (java.util.zip + DOM) — no natives — so the
-  canary (`test/datapackage.sh`, a step of the `jvm-tests` CI job) compiles
-  it with Zulu 8 and runs javac+java assertions against a synthetic package
-  (`test/fixtures/make-datapackage.sh`: openssl self-signed p12s + pref XML;
-  the recipe is committed, no binary fixture). No JUnit, matching the repo
-  idiom.
+- `DataPackage.java` (+ `ConnectOptions.java`, the flag/package precedence
+  merge described above) is pure JDK (java.util.zip + DOM) — no natives — so
+  the canary (`test/datapackage.sh`, a step of the `jvm-tests` CI job)
+  compiles them with Zulu 8 and runs javac+java assertions against a
+  synthetic package (`test/fixtures/make-datapackage.sh`: openssl
+  self-signed p12s + pref XML; the recipe is committed, no binary fixture),
+  including every precedence rule. No JUnit, matching the repo idiom.
+- The launcher src is compile-gated in the same job (`test/compile-gate.sh`,
+  #29): atak-headless's own javac line (`-Xlint:all -Werror`, the same
+  mavenLocal-first/transplants-fallback classpath), with the commo API
+  classes javac'd from the checkout — CI previously never type-checked
+  `HeadlessCLI.java` at all.
 - Hardening matches the CoT side's posture: DOCTYPE disallowed and external
   entities off when parsing `preference.pref` (XXE); zip entry names with
   `..`, absolute paths or backslashes are refused before extraction

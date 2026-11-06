@@ -13,8 +13,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   hand-feeding flags: CoT host:port from `preference.pref`'s `cot_streams`,
   the callsign, and the PKCS#12 pair extracted to a temp dir — explicit
   flags still win, `MACTAK_CERT_PASS` overrides the package's password, and
-  failures exit 2. Pure-JDK importer hardened against XXE and Zip-Slip;
-  canary (`test/datapackage.sh`) runs in the `jvm-tests` CI job.
+  failures exit 2. Pure-JDK importer hardened against XXE, Zip-Slip and
+  oversize entries (#31: 16 MiB for `preference.pref`, 64 MiB per PKCS#12,
+  refused with the byte count); the address line takes a bracketed IPv6
+  literal (stored unbracketed), range-checks the port to 1–65535 on the
+  package and `--connect` paths alike, matches the proto token exactly
+  (`ssl`/`tls`/`tcp` — `dtls` is refused, not mislabeled ssl), and refuses
+  a client/truststore pair sharing one basename (#32); the canary
+  (`test/datapackage.sh`) runs in the `jvm-tests` CI job, which now also
+  compile-gates `HeadlessCLI.java` itself (#29 — CI previously never
+  type-checked the launcher).
+
+### Fixed
+
+- The `--datapackage` cert temp dir is deleted on every exit, not just on
+  the success path — a failed run no longer leaks extracted PKCS#12s in
+  `$TMPDIR` (#27); the selftest cleans its `dpselftest-*` dirs too (#30).
+- The canary's openssl recipe runs on bare macOS LibreSSL
+  (`/usr/bin/openssl`), so the fixture builds without Homebrew OpenSSL (#28).
 
 ## [0.3.0] - 2026-11-05 — G2: map renders (ANGLE on Metal)
 

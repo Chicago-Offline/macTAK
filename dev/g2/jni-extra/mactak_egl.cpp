@@ -181,11 +181,44 @@ namespace {
         cb(debugCallback, nullptr);
     }
 
+    // Pbuffers are fixed at creation: a resize is release, recreate at the new
+    // size and re-make-current on the same config and context (GL objects are
+    // context-owned, so engine state survives). On failure the original
+    // pbuffer is made current again — the context keeps a valid surface, as
+    // createWindowSurface's fallback does.
+    bool rebuildPbuffer(int width, int height) {
+        if (!g.MakeCurrent(g.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT)) {
+            setError("resize: eglMakeCurrent(release)");
+            return false;
+        }
+        const EGLint pbAttrs[] = { EGL_WIDTH, width, EGL_HEIGHT, height, EGL_NONE };
+        const EGLSurface pb = g.CreatePbufferSurface(g.dpy, g.cfg, pbAttrs);
+        if (pb == EGL_NO_SURFACE) {
+            setError("resize: eglCreatePbufferSurface");
+            if (!g.MakeCurrent(g.dpy, g.surf, g.surf, g.ctx))
+                std::fprintf(stderr, "mactak_egl: resize fallback left no current surface\n");
+            return false;
+        }
+        g.DestroySurface(g.dpy, g.surf);
+        g.surf = pb;
+        if (!g.MakeCurrent(g.dpy, g.surf, g.surf, g.ctx)) { setError("resize: eglMakeCurrent"); return false; }
+        EGLint qw = 0, qh = 0;
+        if (!g.QuerySurface(g.dpy, g.surf, EGL_WIDTH, &qw)
+                || !g.QuerySurface(g.dpy, g.surf, EGL_HEIGHT, &qh)
+                || qw != width || qh != height) {
+            setError("resize: rebuilt pbuffer did not take the new size");
+            return false;
+        }
+        g.width = width; g.height = height;
+        return true;
+    }
+
     // M3.1: adopt width/height for the current surface after the host changed
-    // the backing size (the layer's drawableSize). ANGLE's Metal window
-    // surfaces track the layer, so eglQuerySurface should already report the
-    // new size; if it still reports the old one, rebuild the window surface
-    // on the same layer, config and context. Returns false with lastError set.
+    // the backing size. Window surfaces: ANGLE's Metal backend tracks the
+    // layer's drawableSize, so eglQuerySurface should already report the new
+    // size; if it still reports the old one, rebuild the window surface on
+    // the same layer, config and context. Pbuffers: rebuildPbuffer. Returns
+    // false with lastError set.
     bool adoptSurfaceSize(int width, int height) {
         EGLint qw = 0, qh = 0;
         if (g.QuerySurface(g.dpy, g.surf, EGL_WIDTH, &qw)
@@ -194,7 +227,7 @@ namespace {
             g.width = width; g.height = height;
             return true;
         }
-        if (!g.nativeWindow) { setError("eglQuerySurface: surface reports a different size"); return false; }
+        if (!g.nativeWindow) return rebuildPbuffer(width, height);
         if (!g.MakeCurrent(g.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT)) {
             setError("resize: eglMakeCurrent(release)");
             return false;

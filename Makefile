@@ -1,4 +1,4 @@
-.PHONY: help hooks build build-angle angle gen-gles-shim check-gen-gles-shim test test-roundtrip test-render smoke-window lint clean
+.PHONY: help hooks build build-angle angle gen-gles-shim check-gen-gles-shim test test-roundtrip test-render test-render-resize smoke-window lint clean
 
 # The android.opengl.GLES20/30 runtime is GENERATED (dev/g2/gen-gles-shim.py):
 # two Java classes, the JNI bodies and the stub-mode libGLESv2. Edit the
@@ -20,6 +20,7 @@ help:
 	@echo "  test           - run smoke tests (dev/g1/smoke/run.sh)"
 	@echo "  test-roundtrip - run headless round-trip tests (dev/g1/headless/run.sh)"
 	@echo "  test-render    - G2 render smoke: engine GLGlobe into an EGL pbuffer on ANGLE, bare + GeoJSON layer + MBTiles basemap (dev/g2/render/run.sh)"
+	@echo "  test-render-resize - M3.1 dynamic-size exercise: --resize mid-run, bare + GeoJSON layer (surface OnSizeChangedListeners must fire)"
 	@echo "  smoke-window   - G2 M3.0 manual gate: NSWindow -> CAMetalLayer -> eglCreateWindowSurface on ANGLE; opens a window ~3 s, writes dev/g2/build/window-smoke.ppm (needs a GUI session)"
 	@echo "  lint           - shellcheck + bash -n over dev/**/*.sh; markdownlint/actionlint if installed"
 	@echo "  clean          - remove build outputs"
@@ -63,6 +64,14 @@ test-render:
 	bash dev/g2/render/run.sh --layer dev/g1/headless/test/fixtures/sf-landmarks.geojson --out dev/g2/build/render-layer.png
 	bash dev/g2/fixtures/make-basemap.sh
 	bash dev/g2/render/run.sh --basemap dev/g2/build/fixtures/sf-graticule.mbtiles --layer dev/g1/headless/test/fixtures/sf-landmarks.geojson --out dev/g2/build/render-basemap.png
+
+test-render-resize:
+	# M3.1: first real caller of NativeEgl.resize — pbuffer rebuild mid-run,
+	# gated on the surface's OnSizeChangedListeners; GLMapView reads
+	# width/height per frame, so the content-pixel check proves uptake.
+	bash dev/g2/render/run.sh --resize 384x256 --out dev/g2/build/render-resize.png
+	bash dev/g2/render/run.sh --layer dev/g1/headless/test/fixtures/sf-landmarks.geojson \
+		--resize 384x256 --out dev/g2/build/render-resize-layer.png
 
 # M3.0 manual gate (dev Mac, GUI session): `angle` stages the ANGLE pair and
 # runs the headless pbuffer canary first, then the window opens for ~3 s and

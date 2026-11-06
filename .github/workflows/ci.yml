@@ -241,6 +241,19 @@ jobs:
           bash dev/g2/render/run.sh --basemap dev/g2/build/fixtures/sf-graticule.mbtiles \
             --layer dev/g1/headless/test/fixtures/sf-landmarks.geojson --out dev/g2/build/render-basemap.png
 
+      - name: Dynamic-size render smoke (--resize mid-run, M3.1)
+        # pbuffer rebuild via NativeEgl.resize; PASS requires the surface's
+        # OnSizeChangedListeners to fire and content pixels at the new size
+        # (GLMapView reads width/height per frame, so that count is the proof
+        # of engine uptake).
+        if: needs.changes.outputs.changed == 'true'
+        env:
+          MACTAK_GL_DEBUG: '1'
+        run: |
+          bash dev/g2/render/run.sh --resize 384x256 --out dev/g2/build/render-resize.png
+          bash dev/g2/render/run.sh --layer dev/g1/headless/test/fixtures/sf-landmarks.geojson \
+            --resize 384x256 --out dev/g2/build/render-resize-layer.png
+
       - name: Offline layer canary on the ANGLE-linked engine
         # both canaries report every run; only a failed build skips this one
         if: ${{ !cancelled() && steps.build-commo.outcome == 'success' }}
@@ -256,6 +269,8 @@ jobs:
             dev/g2/build/render-smoke.png
             dev/g2/build/render-layer.png
             dev/g2/build/render-basemap.png
+            dev/g2/build/render-resize.png
+            dev/g2/build/render-resize-layer.png
             hs_err_pid*.log
           if-no-files-found: error
 

@@ -84,8 +84,27 @@ public final class DataPackageSelfTest {
         File fixture = new File(args[0]);
         String expectCallsign = args.length > 1 ? args[1] : null;
         File dir = Files.createTempDirectory("dpselftest-happy").toFile();
-        dir.deleteOnExit();
+        File work = Files.createTempDirectory("dpselftest-neg").toFile();
+        boolean ok;
+        try {
+            ok = run(fixture, expectCallsign, dir, work);
+        } finally {
+            // deleteOnExit is a silent no-op on a non-empty directory
+            // (File.delete only removes empty ones), so both roots — and the
+            // extracted PKCS#12s inside — survived every run (#30). Delete
+            // the trees for real, whatever the outcome. The nonzero exit for
+            // failures happens in main, AFTER this finally: System.exit
+            // would skip it and reintroduce the leak on failing runs.
+            deleteTree(dir);
+            deleteTree(work);
+        }
+        if (!ok)
+            System.exit(1);
+    }
 
+    /** Every assertion; main owns the temp-dir lifecycle (see its finally). */
+    private static boolean run(File fixture, String expectCallsign,
+                               File dir, File work) throws Exception {
         // --- happy path: the openssl-built fixture ---------------------
         DataPackage.Resolved r = DataPackage.open(fixture, dir);
         check("dp.example.test".equals(r.host), "host from cot_streams address0");
@@ -110,8 +129,6 @@ public final class DataPackageSelfTest {
                 "Resolved.toString never prints the password");
 
         // --- hostile/malformed packages ---------------------------------
-        File work = Files.createTempDirectory("dpselftest-neg").toFile();
-        work.deleteOnExit();
         byte[] blob = "not-a-real-p12".getBytes(StandardCharsets.UTF_8);
 
         File slip = writeZip(new File(work, "slip.dp"), VALID_PREF,
@@ -174,9 +191,22 @@ public final class DataPackageSelfTest {
 
         if (failures == 0) {
             System.out.println("datapackage-selftest: ALL PASS");
-            return;
+            return true;
         }
         System.out.println("datapackage-selftest: " + failures + " FAILURES");
-        System.exit(1);
+        return false;
+    }
+
+    /**
+     * Files first, then the dir — {@link File#delete} skips non-empty
+     * directories, which is exactly what bit #30. Best-effort: like any
+     * temp cleanup it must never mask the run's result by throwing.
+     */
+    private static void deleteTree(File dir) {
+        File[] kids = dir.listFiles();
+        if (kids != null)
+            for (File kid : kids)
+                deleteTree(kid);
+        dir.delete();
     }
 }

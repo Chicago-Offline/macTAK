@@ -53,3 +53,7 @@ fi
 
 OUT_PPM="${MACTAK_SMOKE_PPM:-}"
 "$WORK/egl-triangle-window" ${OUT_PPM:+"$OUT_PPM"}
+# Gate on the evidence artifact: the binary only WARNs on an unwritable
+# artifact path, so an empty/missing PPM must fail the run here (#39).
+[[ -z "$OUT_PPM" || -s "$OUT_PPM" ]] \
+  || { echo "FATAL: artifact $OUT_PPM missing/empty (see the binary's WARN above)" >&2; exit 1; }

@@ -245,17 +245,21 @@ int main(int argc, char **argv) {
     int centreOk = c[0] > 240 && c[1] > 100 && c[1] < 160 && c[2] < 16;
     int cornerOk = k[0] < 16 && k[1] < 16 && k[2] > 48 && k[2] < 80;
 
+    int ppmOk = 1;
     if (ppm) {
         FILE *f = fopen(ppm, "wb");
         if (f) {
             fprintf(f, "P6\n%d %d\n255\n", (int)W, (int)H);
             for (int y = H - 1; y >= 0; y--)          /* GL is bottom-up */
                 for (int x = 0; x < W; x++) fwrite(&px[(y * W + x) * 4], 1, 3, f);
-            fclose(f);
-            printf("egl-triangle-window: wrote %s\n", ppm);
+            ppmOk = !ferror(f) && fclose(f) == 0;     /* a 0-byte artifact is no artifact */
+            if (ppmOk)
+                printf("egl-triangle-window: wrote %s\n", ppm);
         } else {
-            fprintf(stderr, "egl-triangle-window: WARN: could not write %s\n", ppm);
+            ppmOk = 0;
         }
+        if (!ppmOk)
+            fprintf(stderr, "egl-triangle-window: WARN: could not write %s\n", ppm);
     }
     free(px);
 
@@ -292,6 +296,7 @@ int main(int argc, char **argv) {
     eglTerminate(dpy);
 
     if (!centreOk || !cornerOk) return fail("pixel check");
+    if (ppm && !ppmOk) return fail("PPM artifact write");
     printf("egl-triangle-window: PASS\n");
     return 0;
 }

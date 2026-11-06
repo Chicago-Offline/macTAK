@@ -80,6 +80,14 @@ by path, gets `@loader_path` in its rpath, and `native-dist/` receives
   swaps the surface for a `CAMetalLayer`-backed window surface
   (`eglCreateWindowSurface` on a CALayer is supported by ANGLE's Metal
   backend) — the EGL/GL side above it does not change.
+- **M3 host = Swift/AppKit shell + `libjli`, not a window in the JNI glue
+  (2026-11-05).** The shell is written once at M3 and becomes G3's
+  starting point; writing the window into the glue instead saves ~2–3 days
+  now but costs the same window work again at G3, under pressure, and it
+  dodges no risk — both variants share the AppKit-main + Java-render
+  thread topology. The JVM-first variant is the documented fallback with
+  trigger conditions: see "M3 design — window surface and host model"
+  below.
 - **Shadow classes over a forked jar.** The engine jar is a pinned,
   checksummed transplant; putting `com.atakmap.map.EngineLibrary` and the
   `android.*` runtime types ahead of it on the classpath keeps the jar
@@ -167,9 +175,12 @@ is ordered roughly by when it bites.
 
 - **Window surface (M3 — next).** `CAMetalLayer` in an `NSView` →
   `eglCreateWindowSurface`; AppKit main thread vs JVM render thread (R4)
-  decided here. Candidate: Swift/AppKit shell launching the JVM in-process
-  via `libjli` (`JNI_CreateJavaVM`). The EGL/GL stack above the surface
-  does not change (see "Pbuffer first, window second" above).
+  decided here. Host **decided 2026-11-05**: the Swift/AppKit shell
+  launching the JVM in-process via `libjli` (`JNI_CreateJavaVM`) — the
+  gate list, thread topology, and the JVM-first fallback with its trigger
+  conditions are in "M3 design — window surface and host model (decided
+  2026-11-05)" below. The EGL/GL stack above the surface does not change
+  (see "Pbuffer first, window second" above).
 - **Real imagery (G2.4) pulls three engine patches** — latent upstream
   bugs documented but not yet exercised by the synthetic fixture, plus the
   native line renderer's integer attributes:
@@ -396,3 +407,122 @@ Francisco. No network, no third-party imagery licence.
   outside `view.render()`, which is why the frame-loop `glGetError` count
   stays 0. Fix (bind `core.shader.handle` before compositing) belongs in an
   engine patch once the tile-sharing paths are exercised with real imagery.
+
+## M3 design — window surface and host model (decided 2026-11-05)
+
+Design exploration before implementation; no code yet. The gate renders the
+G2.3 map (GeoJSON + MBTiles graticule) into a resizable native macOS window
+with live pan/zoom/rotate — G2's exit criterion — and settles R4 (AppKit
+main thread vs JVM render thread) on evidence.
+
+### The contract M3 must satisfy
+
+The surface contract is deliberately small, which is why "pbuffer first,
+window second" works:
+
+- `RenderSurface` (`gov/tak/api/engine/map/RenderSurface.java`):
+  `getDpi/getWidth/getHeight` + `OnSizeChangedListener` add/remove —
+  nothing else. The engine never learns what kind of surface it is.
+- `RenderContext`: `attach/detach` (make-current), `queueEvent` (marshal to
+  the render thread), `requestRefresh`, `setFrameRate`,
+  `setContinuousRenderEnabled` — currently stubs or pump-driven in
+  `EglRenderContext`; M3 makes them real.
+- `GLMapView.getSurface()` casts the context to `GLMapSurface`, so our
+  context must keep extending that jar class (shadow-class pattern; jar
+  stays byte-identical).
+
+Everything above the surface (Globe → GLMapView → generated GLES shim →
+JNI) is untouched.
+
+### Host model — decided: the Swift/AppKit shell + `libjli` ("A")
+
+| | A — Swift shell + `libjli` (chosen) | B — JVM-first, window in the glue |
+|---|---|---|
+| Process | Swift binary dlopens `libjli`, `JNI_CreateJavaVM` (classpath handed in by the run script), creates the window, JNI-upcalls `WindowApp.start` | keep the `java` launcher; an ObjC++ TU (`mactak_window.mm`) in the glue creates NSWindow/`CAMetalLayer` and runs `NSApp` on the process main thread |
+| Cost now | ~2–3 days more (bootstrap ~1 d, SwiftPM/Makefile/CI ~½ d, upcall debug ~½–1 d) | ~2–3 days less to first pixels |
+| Cost through G3 | Swift window code written once; carries forward as G3's starting point | ObjC++ window code (~1–1.5 d) is throwaway — deleted at G3 when the Swift shell is written there (~2–3 d, under G3 pressure alongside the real native-UI work) |
+| Threading / R4 | AppKit main + Java render thread | identical topology — B dodges nothing |
+| Shutdown | shell owns both lifecycles; teardown trivial | JVM owned by the `java` launcher, AppKit a guest inside it — the gnarly bit (cf. embedded-SWT macOS) |
+
+B is a time-shift, not a risk reduction: total window-code effort is
+~3–4.5 days split across two gates vs ~2–3 days once for A, and the
+riskiest new learning (the `libjli` bootstrap) moves to the calmest
+possible context instead of mid-G3. Verified on this box (2026-11-05):
+Zulu 8 arm64 keeps `libjli.dylib` at the JDK 8 layout
+(`zulu-8.jdk/Contents/Home/jre/lib/jli/libjli.dylib`, copy at
+`Contents/MacOS/libjli.dylib`); the bootstrap probes both that and the 9+
+layout (`lib/libjli.dylib`) via `/usr/libexec/java_home -v 1.8`; Swift
+6.4.2/arm64 present.
+
+### Architecture (committed)
+
+- **One process.** AppKit main thread owns the window and events and never
+  touches EGL. A Java render thread owns the EGL context end-to-end
+  (contexts are single-thread-bound; same as today) and runs
+  `pump() → view.render() → swap()`.
+- **Marshal point:** AppKit events and UI-side calls go through the
+  existing `queueEvent`/`pump`; the engine's async layer renderers already
+  assume it.
+- **Vsync:** throttled `eglSwapBuffers` first (ANGLE-on-Metal presents via
+  `CAMetalLayer`, which paces at display cadence). `CVDisplayLink` only if
+  pacing measurably drifts — it costs a JNI-attach-per-callback thread.
+- **JNI boundary:** the `CAMetalLayer*` crosses as an opaque `jlong`; Java
+  never dereferences it. Gestures are interpreted JVM-side
+  (`InputBridge`) so the Swift shell stays thin;
+  `CameraController.Interactive.panBy/zoomBy/rotateBy/tiltBy` are the
+  engine's own gesture entry points.
+- **Calibration:** `getWidth/getHeight` are pixels
+  (`CAMetalLayer.drawableSize` = point size × backing scale); `getDpi()` =
+  72 × backingScale (Android feeds ~160×density). One visual check on
+  label sizing, not guesswork.
+- **Natives:** `mactak_egl.cpp` grows `createWindowSurface(void* layer, w,
+  h, dpi)`, `resize(w, h)`, `swap()`; `NativeEgl.java` the matching three.
+  `EglRenderContext` goes dynamic: fires `OnSizeChangedListener` (GLMapView
+  listens and fixes its own viewport), `requestRefresh` → atomic dirty
+  flag, `setFrameRate` clamps the loop.
+
+### De-risk sequence — cheapest proof first
+
+| Step | What | Exit gate |
+|---|---|---|
+| M3.0 (~1 d) | `smoke/egl-triangle-window.m`: NSWindow → `CAMetalLayer` → `eglCreateWindowSurface` → visible triangle, on the staged Electron-bundled ANGLE pair | verifies the one upstream-true-but-unproven claim before any shell exists |
+| M3.1 | window natives + dynamic-size `EglRenderContext` (exercised headlessly; pbuffer still in CI) | pbuffer canary stays green |
+| M3.2 | shell + static frame (`WindowApp.java` lifts Globe/layers setup from `RenderSmoke`) | static frame on screen; readback PNG passes |
+| M3.3 | loop + live resize + Retina (occlusion pauses the loop) | resize during pan without glitches; 60 fps logged |
+| M3.4 | `InputBridge` gestures (drag→panBy, scroll/pinch→zoomBy with focus point, two-finger rotate→rotateBy); fps log; **R4 verdict recorded here and in the roadmap** | gesture-driven pan/zoom/rotate at 60 fps — G2's exit criterion |
+
+CI: the pbuffer canary stays the automated gate; a compile-only job keeps
+the Swift from rotting; the window gate is manual on the dev Mac with the
+readback PNG as its artifact.
+
+### Fallbacks, with triggers
+
+**F1 — IOSurface client-buffer path (within A). Trigger: M3.0 red after
+~a day.** If the staged ANGLE pair refuses `eglCreateWindowSurface` on a
+`CAMetalLayer`, render into an IOSurface-backed texture and display it
+through the layer via `EGL_ANGLE_metal_texture_client_buffer` — Chromium's
+own macOS architecture (it does not use the window-surface path),
+production-proven but more moving parts (IOSurface lifecycle, texture
+bridge, explicit frame pacing).
+
+**F2 — option B, JVM-first. Trigger: the `libjli` bootstrap or the shell
+upcalls go red after ~a day of trying.** Keep the `java` launcher;
+`mactak_window.mm` in `jni-extra/` creates the NSWindow/`CAMetalLayer`;
+`NSApp` runs on the process main thread (which is Java's main — no AWT, so
+no `-XstartOnFirstThread` entanglement); the render loop runs on a spawned
+Java thread exactly as in A; ObjC++ event handlers upcall JNI into
+`InputBridge` (attached-thread upcalls from AppKit are fine). The fiddly
+part is teardown: the JVM is owned by the `java` launcher, so window close
+must route NSApp termination into a clean engine/EGL shutdown and then
+`System.exit` without fighting either runtime. Steps mirror M3.0–M3.4 with
+M3.2 swapped for "window TU + static frame" (`run.sh` reused wholesale).
+The window code is throwaway, deleted at G3. SWT-on-macOS is the
+existence proof that B works — and its famously gnarly lifecycle code is
+what A avoids by making the shell own both lifecycles. F2 gains ~2 days to
+first pixels and nothing else.
+
+### Out of scope (unchanged)
+
+AWT stays out (`java.awt.headless=true` remains); the split-process design
+stays shelved unless F1 *and* F2 both go red; G2.4 (real imagery, three
+engine patches) is the next milestone after M3 and separate.

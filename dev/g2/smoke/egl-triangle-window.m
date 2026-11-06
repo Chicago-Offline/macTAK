@@ -298,13 +298,16 @@ int main(int argc, char **argv) {
     }
     printf("egl-triangle-window: presented %d frame(s) in %.1f s\n", frames, (double)SMOKE_SECONDS);
 
+    /* Judge the run before tearing EGL down: fail()'s diagnostics read
+     * eglGetError/glGetError, which are meaningless after teardown (#38). */
+    if (!centreOk || !cornerOk) return fail("pixel check");
+    if (ppm && !ppmOk) return fail("PPM artifact write");
+
     eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     eglDestroyContext(dpy, ctx);
     eglDestroySurface(dpy, surf);
     eglTerminate(dpy);
 
-    if (!centreOk || !cornerOk) return fail("pixel check");
-    if (ppm && !ppmOk) return fail("PPM artifact write");
     printf("egl-triangle-window: PASS\n");
     return 0;
 }

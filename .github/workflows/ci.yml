@@ -242,9 +242,10 @@ jobs:
             --layer dev/g1/headless/test/fixtures/sf-landmarks.geojson --out dev/g2/build/render-basemap.png
 
       - name: Dynamic-size render smoke (--resize mid-run, M3.1)
-        # pbuffer rebuild via NativeEgl.resize; PASS requires the size change
-        # to reach GLMapView (OnSizeChangedListener) and content pixels at
-        # the new size.
+        # pbuffer rebuild via NativeEgl.resize; PASS requires the surface's
+        # OnSizeChangedListeners to fire and content pixels at the new size
+        # (GLMapView reads width/height per frame, so that count is the proof
+        # of engine uptake).
         if: needs.changes.outputs.changed == 'true'
         env:
           MACTAK_GL_DEBUG: '1'

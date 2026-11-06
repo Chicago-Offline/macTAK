@@ -136,9 +136,11 @@ public final class RenderSmoke {
         }
 
         EglRenderContext ctx = new EglRenderContext(w, h, 128d);
-        // Watch the event the engine itself consumes: GLMapView registers as
-        // the surface's OnSizeChangedListener host-side, so PASS can require
-        // the resize to have reached the engine, not just the EGL surface.
+        // Gate on the RenderSurface listener contract: ctx.resize() fires the
+        // surface's OnSizeChangedListeners synchronously (GLMapView registers
+        // none of its own — it reads width/height off the surface each frame,
+        // so engine uptake is what the content-pixel count at the new size
+        // proves).
         final int[] seenSize = { -1, -1 };
         ctx.addOnSizeChangedListener((surface, nw, nh) -> { seenSize[0] = nw; seenSize[1] = nh; });
         px = ctx.readbackBuffer();   // the context owns the readback from here on

@@ -20,7 +20,7 @@ help:
 	@echo "  test           - run smoke tests (dev/g1/smoke/run.sh)"
 	@echo "  test-roundtrip - run headless round-trip tests (dev/g1/headless/run.sh)"
 	@echo "  test-render    - G2 render smoke: engine GLGlobe into an EGL pbuffer on ANGLE, bare + GeoJSON layer + MBTiles basemap (dev/g2/render/run.sh)"
-	@echo "  test-render-resize - M3.1 dynamic-size exercise: --resize mid-run, bare + GeoJSON layer (OnSizeChangedListener must fire)"
+	@echo "  test-render-resize - M3.1 dynamic-size exercise: --resize mid-run, bare + GeoJSON layer (surface OnSizeChangedListeners must fire)"
 	@echo "  smoke-window   - G2 M3.0 manual gate: NSWindow -> CAMetalLayer -> eglCreateWindowSurface on ANGLE; opens a window ~3 s, writes dev/g2/build/window-smoke.ppm (needs a GUI session)"
 	@echo "  lint           - shellcheck + bash -n over dev/**/*.sh; markdownlint/actionlint if installed"
 	@echo "  clean          - remove build outputs"
@@ -67,7 +67,8 @@ test-render:
 
 test-render-resize:
 	# M3.1: first real caller of NativeEgl.resize — pbuffer rebuild mid-run,
-	# gated on the size change reaching GLMapView (OnSizeChangedListener).
+	# gated on the surface's OnSizeChangedListeners; GLMapView reads
+	# width/height per frame, so the content-pixel check proves uptake.
 	bash dev/g2/render/run.sh --resize 384x256 --out dev/g2/build/render-resize.png
 	bash dev/g2/render/run.sh --layer dev/g1/headless/test/fixtures/sf-landmarks.geojson \
 		--resize 384x256 --out dev/g2/build/render-resize-layer.png

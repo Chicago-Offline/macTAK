@@ -64,6 +64,22 @@ nc -z -G 2 "$TAK_HOST" "$TAK_PORT" >/dev/null 2>&1 \
   || { echo "run.sh: no TAK server on $TAK_HOST:$TAK_PORT — start one first (set TAK_HOST/TAK_PORT)" >&2; exit 1; }
 echo "[g1-roundtrip] server reachable at $TAK_HOST:$TAK_PORT${TAK_CERT:+ (ssl)} — running two atak-headless clients ${DURATION}s"
 
+# Warm the launcher's on-demand javac BEFORE the clients go out: they
+# launch 1s apart, and the second one's freshness check finds the first
+# one's half-written build/classes (or none yet), skips compiling and
+# execs java into it — dead before its first line, exit 1 (observed
+# 2026-11-06 in cot-roundtrip once ConnectOptions.java made the compile
+# outlast the 1s offset; the race was latent since G1.4). A no-arg
+# atak-headless compiles, loads the natives, prints usage and exits 2:
+# anything else — 1 a compile failure, 3 a native/JVM failure — stops
+# here loudly instead of failing eight assertions later.
+set +e
+bash "$HERE/atak-headless" >/dev/null 2>&1
+warm_rc=$?
+set -e
+[[ "$warm_rc" -eq 2 ]] \
+  || { echo "run.sh: launcher warm-up failed (exit $warm_rc — compile or native load problem)" >&2; exit 1; }
+
 set +e
 bash "$HERE/atak-headless" --connect "$TAK_HOST:$TAK_PORT" ${SSL[@]+"${SSL[@]}"} \
     --uid "$UID_A" --callsign "$CS_A" --duration "$DURATION" --db "$DB_A" \

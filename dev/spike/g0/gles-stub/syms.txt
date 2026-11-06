@@ -108,6 +108,10 @@ sqlite3reset
 sqlite3sql
 sqlite3step
 sqlite3stmtbusy
+# NOTE (post-G0 audit): the 11 libxml2 xml* entries below are historical —
+# the G2 rework un-stubbed them (the engine now links Homebrew libxml2; see
+# the stub.c header comment). The gl*/sqlite3* entries above match the stub
+# as built.
 xmlFreeTextReader
 xmlReaderForFile
 xmlReaderForMemory

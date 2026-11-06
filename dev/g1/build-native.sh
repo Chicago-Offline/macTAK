@@ -36,6 +36,9 @@ die() { printf '\n[g1] FATAL: %s\n' "$*" >&2; exit 1; }
 
 # Minimal EXIT trap: on failure, report context; always, kill any lingering
 # child process group and sweep the throwaway build tree if we created it.
+# G1_CLEANED_ON_EXIT=1 skips the sweep so $WORK survives a failed build for
+# post-mortem inspection (documented by the post-G0 audit; the knob existed
+# but was referenced nowhere else).
 _rc=0
 trap '_rc=$?; if (( _rc != 0 )); then
         printf "[g1] build FAILED (exit %s) at line %s — inspect %s if present\n" "$_rc" "${LINENO:-?}" "$WORK" >&2

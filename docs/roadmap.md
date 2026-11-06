@@ -17,7 +17,7 @@ Gate-gated plan. Each gate has: **objective → exit criteria (demo artifact) �
 
 ## G1 — Headless engine + CoT round-trip (2–3 mo)
 
-> **Status: DONE (2026-11-04).** M1 (2026-11-02): engine loads in-process from a Zulu 8 JVM via the JNI glue. M2 (2026-11-03): `dev/g1/headless/atak-headless --connect HOST:PORT` runs the commoncommo stack headless; CoT round-trip verified against FreeTAKServer and OpenTAKServer (two clients, marker + presence relayed both ways). M3 (2026-11-03): `atak-headless --layer FILE` opens GeoJSON/GPKG/KML/SHP through the native OGR provider into `PersistentDataSourceFeatureDataStore2` and reads them back via `FeatureDataStore2` — the offline-layer criterion, headless; four-format canary in CI. M4 (2026-11-04): one JVM loads engine + comms together; received CoT is persisted through the engine's `DatabaseImpl` JNI into a sqlite tracks DB (`--db`) and the latest fix per uid is printed on exit — the exit demo below, witnessed on OpenTAKServer over TCP and SSL (`--cert/--ca` from an ATAK data package) and hermetically in CI. See `../dev/g1/NOTES.md`.
+> **Status: DONE (2026-11-04).** M1 (2026-11-02): engine loads in-process from a Zulu 8 JVM via the JNI glue. M2 (2026-11-03): `dev/g1/headless/atak-headless --connect HOST:PORT` runs the commoncommo stack headless; CoT round-trip verified against FreeTAKServer and OpenTAKServer (two clients, marker + presence relayed both ways). M3 (2026-11-03): `atak-headless --layer FILE` opens GeoJSON/GPKG/KML/SHP through the native OGR provider into `PersistentDataSourceFeatureDataStore2` and reads them back via `FeatureDataStore2` — the offline-layer criterion, headless; four-format canary in CI. M4 (2026-11-04): one JVM loads engine + comms together; received CoT is persisted through the engine's `DatabaseImpl` JNI into a sqlite tracks DB (`--db`) and the latest fix per uid is printed on exit — the exit demo below, witnessed on OpenTAKServer over TCP and SSL (`--cert/--ca` from an ATAK data package) and hermetically in CI. **G1.5 follow-ups (2026-11-05, #27–#32):** `atak-headless --datapackage FILE` resolves an ATAK data package — CoT host:port from `preference.pref`'s `cot_streams`, the callsign, and the PKCS#12 pair — behind a hardened pure-JDK importer (XXE/Zip-Slip/size caps, bracketed IPv6 literals, exact `ssl`/`tls`/`tcp` proto-token match, cert temp dir cleaned on every exit); CI's `jvm-tests` job now compile-gates the launcher. See `../dev/g1/NOTES.md` §G1.5.
 
 **Objective:** JVM process on macOS: engine loads, offline map layer opens, CoT in/out via commoncommo.
 
@@ -30,7 +30,7 @@ Gate-gated plan. Each gate has: **objective → exit criteria (demo artifact) �
 
 ## G2 — Map renders in a native macOS window (2–3 mo) — *branch point*
 
-> **Status: M1 DONE (2026-11-04) — branch decided: H2.** ANGLE (EGL 1.5 + GL ES 3.0, Metal backend) fills the engine's GLES-stub link slot (`MACTAK_GLES=angle bash dev/g1/build-native.sh`); all 80 GL symbols the engine imports resolve against it (R2 retired). `GLMapView.render()` driven from a Zulu 8 JVM through a new `EglRenderContext` draws into an EGL pbuffer with zero GL errors at ~3–5 ms/frame (512², no layers) — `make test-render`. Three contract defects were ours, now patched: the G0 stub silently no-op'd libxml2; `renderer/GL.h` emitted desktop `#version 330` on macOS; `GLTerrainTile` enabled attribute `-1` on shader variants lacking it. **M2 (2026-11-04): first map content** — a GeoJSON `FeatureLayer3` (polygons, anti-aliased lines, labelled points) renders through the engine's Java-side renderers on ANGLE via a generated `android.opengl.GLES20/30` → ANGLE JNI shim and Java2D-backed `android.graphics`; `make test-render` writes the frame as PNG and CI uploads it. **M2.3 (2026-11-05): offline raster basemap** — a synthetic MBTiles graticule (generated offline by the gdal CLI, zoom 10–14) renders under the vector layer through `PersistentRasterDataStore` → `MobileImageryRasterLayer2` → `GLQuadTileNode4` on ANGLE; the coordinate labels line up with the GeoJSON geometry. Next (M3): window surface (`CAMetalLayer` → `eglCreateWindowSurface`); R4 (AppKit vs JVM threading) is decided there. See `../dev/g2/NOTES.md`.
+> **Status: M1 DONE (2026-11-04) — branch decided: H2.** ANGLE (EGL 1.5 + GL ES 3.0, Metal backend) fills the engine's GLES-stub link slot (`MACTAK_GLES=angle bash dev/g1/build-native.sh`); all 80 GL symbols the engine imports resolve against it (R2 retired). `GLMapView.render()` driven from a Zulu 8 JVM through a new `EglRenderContext` draws into an EGL pbuffer with zero GL errors at ~3–5 ms/frame (512², no layers) — `make test-render`. Three contract defects were ours, now patched: the G0 stub silently no-op'd libxml2; `renderer/GL.h` emitted desktop `#version 330` on macOS; `GLTerrainTile` enabled attribute `-1` on shader variants lacking it. **M2 (2026-11-04): first map content** — a GeoJSON `FeatureLayer3` (polygons, anti-aliased lines, labelled points) renders through the engine's Java-side renderers on ANGLE via a generated `android.opengl.GLES20/30` → ANGLE JNI shim and Java2D-backed `android.graphics`; `make test-render` writes the frame as PNG and CI uploads it. **M2.3 (2026-11-05): offline raster basemap** — a synthetic MBTiles graticule (generated offline by the gdal CLI, zoom 10–14) renders under the vector layer through `PersistentRasterDataStore` → `MobileImageryRasterLayer2` → `GLQuadTileNode4` on ANGLE; the coordinate labels line up with the GeoJSON geometry. Next (M3): window surface — `CAMetalLayer` in an `NSView` → `eglCreateWindowSurface`, candidate host a Swift/AppKit shell launching the JVM in-process via `libjli` (`JNI_CreateJavaVM`); R4 (AppKit vs JVM threading) is decided there. **G2.4 (real imagery)** follows, pulling three documented engine patches (`GLMegaTexture::shareTile`'s comma-operator bug, `GLQuadTileNode4.resolveTexture` compositing with `uColor` on whatever program is current, integer vertex attributes fed through `glVertexAttribPointer`) and re-opening the `org.gdal` JNI for `GdalTileReader`. See `../dev/g2/NOTES.md`.
 
 **Objective:** The engine's map view composites into a native macOS window.
 
@@ -81,7 +81,21 @@ Reference evidence exists (2026-11-02): a full-display capture of the WinTAK gol
 | R6 GPL obligations | G5 | Publish at first external release; legal review at G0 kickoff |
 | R7 scripted UX-parity capture is fragile (WinTAK UI wedge; ~4 px text at guest scale 5120×2600→1280×650) | G6 | Protocol-level CoT witnesses + config-driven setup (`Config.xml`); capture from clones, restart between scripted passes (`pathway-a.md` gotchas #4–5) |
 
-## Spike checklist (copy-paste start)
+## Where the work lives now
+
+The G0 recipe below is the historical record (see also `dev/spike/g0/NOTES.md`, which documents the wrapper it was consolidated into). G0–G2 work is driven by the Makefile against the dev harnesses:
+
+```sh
+git submodule update --init --recursive     # stl-soft + khronos registries (all public)
+make hooks                                  # install the pre-commit gate chain
+make build                                  # engine + JNI glue + commo, stub GLES (CI's mode)
+make build-angle                            # stage ANGLE, rebuild with it in the GLES slot
+make test                                   # load smoke: engine + JNI in one JVM
+make test-roundtrip                         # CoT round-trip (FTS / OpenTAKServer / fake-cot-server)
+make test-render                            # G2 render smoke: bare + GeoJSON layer + MBTiles basemap
+```
+
+G0 spike recipe (historical — the current build path is `make build`):
 
 ```sh
 cd macTAK/src
@@ -93,4 +107,4 @@ cmake -S takkernel/engine/src/main/cpp -B /tmp/takeng -DCMAKE_BUILD_TYPE=RelWith
 cd takkernel && ../../gradlew publishToMavenLocal -PkernelBuildTarget=java
 ```
 
-CI & QA infrastructure (what runs, where, and why): see `ci-qa.md` — Tier 1 (`jvm-tests`, `native-engine`, `lint`) lands with this spike; `native-engine` is R1's scored signal. Tier 2's `engine-integration` wiring is pre-validated on the dev Mac (FreeTAKServer container + CoT proxy bridge, `pathway-a.md` §FTS round-trip).
+CI & QA infrastructure (what runs, where, and why): see `ci-qa.md`. Tier 0/1 (`lint`, `native-engine`, `jvm-tests`) landed 2026-11-02 and gate every PR; `native-engine` is R1's scored signal. The 2026-11-05 ops traps (ANGLE release-CDN 504 retry, hosted-runner pool contention) are recorded in `dev/g2/NOTES.md`. Tier 2's `engine-integration` wiring is pre-validated on the dev Mac (FreeTAKServer container + CoT proxy bridge, `pathway-a.md` §FTS round-trip).

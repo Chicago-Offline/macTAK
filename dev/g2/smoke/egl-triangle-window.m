@@ -102,6 +102,14 @@ static GLuint shader(GLenum type, const char *src) {
 int main(int argc, char **argv) {
     const char *ppm = argc > 1 ? argv[1] : NULL;
 
+    /* No Metal device (headless VM, no GPU): the CAMetalLayer below would get
+     * no device and eglCreateWindowSurface would misreport that as an F1
+     * trigger (#42). Bail here with the exit map's driver-unavailable code. */
+    if (!MTLCreateSystemDefaultDevice()) {
+        fprintf(stderr, "egl-triangle-window: no Metal device (MTLCreateSystemDefaultDevice returned nil)\n");
+        return 2;
+    }
+
     /* App without a bundle: claim the regular policy so the window can be
      * key and front; the present loop pumps events by hand (no app.run). */
     NSApplication *app = [NSApplication sharedApplication];

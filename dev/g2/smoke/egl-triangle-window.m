@@ -13,7 +13,8 @@
  * EGL_ANGLE_metal_texture_client_buffer, Chromium-style.
  *
  * Needs a GUI session (opens a real window); CI compiles it only
- * (run-window.sh --compile-only). Esc or the close button ends it early.
+ * (run-window.sh --compile-only). Esc or the close button ends it early —
+ * before the first frame presents, that is a FAIL (#40).
  * Writes a PPM of the pre-swap framebuffer if a path is given (argv[1]).
  *
  * Exit: 0 PASS, 1 FAIL, 2 EGL/driver unavailable.
@@ -299,6 +300,13 @@ int main(int argc, char **argv) {
     }
     printf("egl-triangle-window: presented %d frame(s) in %.1f s\n",
            frames, [NSDate timeIntervalSinceReferenceDate] - t0);
+
+    /* The pixel checks ran before this loop, so without this gate a run
+     * whose window never became visible would exit after 0 frames with
+     * PASS — the "presented" half of the smoke silently didn't happen
+     * (#40). Fail regardless of cause, per the decision in #40. */
+    if (frames == 0)
+        return fail("no frames presented (window never visible, or closed/Esc instantly)");
 
     /* Judge the run before tearing EGL down: fail()'s diagnostics read
      * eglGetError/glGetError, which are meaningless after teardown (#38). */

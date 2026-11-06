@@ -191,6 +191,10 @@ public final class HeadlessCLI {
                     host = hp[0];
                     try { port = Integer.parseInt(hp[1]); }
                     catch (NumberFormatException e) { usage(2); }
+                    // (#32) The same 1-65535 range the package path checks —
+                    // an out-of-range port dies at usage, not in an obscure
+                    // commo failure at connect.
+                    if (port < 1 || port > 65535) usage(2);
                     break;
                 case "--uid":       if (i + 1 >= args.length) usage(2);
                                     uid = args[++i]; break;

@@ -44,8 +44,11 @@ import org.xml.sax.SAXParseException;
  * <ul>
  *   <li>{@code host}, {@code port}, {@code ssl} — the first {@code addressN}
  *       entry of the first preference whose name contains "cot"
- *       ({@code "host:port[:proto]"}; a proto containing ssl/tls sets
- *       {@code ssl});</li>
+ *       ({@code "host:port[:proto]"}: an IPv6 literal is bracketed
+ *       ({@code "[::1]:8089"}) and stored unbracketed; the port is checked
+ *       1–65535; the proto must be exactly {@code ssl}/{@code tls} (→
+ *       {@code ssl}) or {@code tcp}/absent (→ plaintext) — anything else,
+ *       {@code dtls} included, is refused, not guessed);</li>
  *   <li>{@code callsign} — the first {@code callsign} entry in any preference
  *       ({@code null}: the caller keeps its default);</li>
  *   <li>{@code certPath}, {@code caPath} — the two PKCS#12 files extracted to
@@ -72,8 +75,12 @@ import org.xml.sax.SAXParseException;
  * copied (#31) — {@code preference.pref} at 16 MiB, each PKCS#12 at 64 MiB —
  * so an oversize (crafted or accidental) fails with a one-line message, exit
  * 2, instead of filling the disk or OOMing the heap, and a refused cert
- * leaves no partial file behind; {@link Resolved}'s string never prints the
- * password.</p>
+ * leaves no partial file behind; the address line (#32) takes a bracketed
+ * IPv6 literal (kept unbracketed — the form commo's addStreamingInterface
+ * takes), range-checks the port to 1–65535 before commo can see it, matches
+ * the proto token exactly, and refuses two PKCS#12s that share one basename —
+ * the cert dir keeps one flat file per basename, so the two could not coexist;
+ * {@link Resolved}'s string never prints the password.</p>
  *
  * <p>Pure JDK — no commo, no natives — so the importer is testable without
  * the engine: test/datapackage.sh.</p>
@@ -96,6 +103,19 @@ public final class DataPackage {
 
         Pref(String name) {
             this.name = name;
+        }
+    }
+
+    /** One parsed {@code addressN} value; see {@link #parseAddress}. */
+    private static final class EndPoint {
+        final String host;
+        final int port;
+        final boolean ssl;
+
+        EndPoint(String host, int port, boolean ssl) {
+            this.host = host;
+            this.port = port;
+            this.ssl = ssl;
         }
     }
 
@@ -203,6 +223,19 @@ public final class DataPackage {
             } else if (clients == 1 && trusts == 1) {
                 certPath = extract(zip, zip.getEntry(clientName), certDir).getPath();
                 caPath = extract(zip, zip.getEntry(trustName), certDir).getPath();
+            } else if (p12Names.size() == 2
+                    && baseName(p12Names.get(0))
+                        .equalsIgnoreCase(baseName(p12Names.get(1)))) {
+                // (#32) Basename hints cannot split a same-basename pair —
+                // both entries classify alike (trusts 2/clients 0 or the
+                // mirror), so the pair check above always fires for them.
+                // Name the real problem instead of claiming a pair is
+                // missing. Nothing was extracted: the cert dir keeps one
+                // flat file per basename, so these two could never coexist
+                // in it — refuse rather than let the second overwrite the
+                // first.
+                throw new IOException("two PKCS#12s share one basename and "
+                        + "could not both live in the cert dir: " + p12Names);
             } else {
                 throw new IOException("expected a client + truststore PKCS#12 "
                         + "pair, found: " + p12Names);
@@ -223,20 +256,7 @@ public final class DataPackage {
             String address = indexedValue(cot.entries, "address");
             if (address == null || address.isEmpty())
                 throw new IOException(cot.name + " carries no addressN entry");
-            String[] parts = address.split(":", 3);
-            if (parts.length < 2 || parts[0].isEmpty())
-                throw new IOException("cannot parse cot_streams address: "
-                        + address);
-            int port;
-            try {
-                port = Integer.parseInt(parts[1]);
-            } catch (NumberFormatException e) {
-                throw new IOException("cannot parse cot_streams port: "
-                        + address);
-            }
-            boolean ssl = parts.length == 3
-                    && (parts[2].toLowerCase(Locale.US).contains("ssl")
-                        || parts[2].toLowerCase(Locale.US).contains("tls"));
+            EndPoint ep = parseAddress(address);
 
             String callsign = null;
             for (Pref p : prefs) {
@@ -248,9 +268,84 @@ public final class DataPackage {
             }
 
             certPass = prefValue(prefs, "plugin_firecrypt", "Password");
-            return new Resolved(parts[0], port, ssl, callsign,
+            return new Resolved(ep.host, ep.port, ep.ssl, callsign,
                     certPath, caPath, certPass);
         }
+    }
+
+    /**
+     * Parse {@code host:port[:proto]} (#32). An IPv6 literal is bracketed —
+     * {@code "[::1]:8089:ssl"} — and stored unbracketed: commo's
+     * addStreamingInterface takes host and port separately, and the brackets
+     * are a host:port-package convention, not something an address lookup
+     * accepts. The port is range-checked here so 0/99999 dies with a
+     * one-line message instead of an obscure commo failure at connect, and
+     * the proto token matches exactly: ssl/tls (any case) set {@code ssl},
+     * tcp/absent mean plaintext, anything else — dtls included, which the
+     * old {@code contains("tls")} test happily mislabeled ssl — is refused.
+     */
+    private static EndPoint parseAddress(String address) throws IOException {
+        String host;
+        String tail;                       // ":port" or ":port:proto"
+        if (address.startsWith("[")) {
+            int close = address.indexOf(']');
+            if (close < 0)
+                throw new IOException("cannot parse cot_streams address"
+                        + " (no closing ]): " + address);
+            host = address.substring(1, close);
+            tail = address.substring(close + 1);
+            if (host.isEmpty())
+                throw new IOException("cannot parse cot_streams address"
+                        + " (empty IPv6 literal): " + address);
+        } else {
+            // More colons than host:port:proto can hold means an unbracketed
+            // IPv6 literal; say so instead of the old misleading "cannot
+            // parse cot_streams port" a "[::1]:8089" used to get.
+            int colons = 0;
+            for (int i = 0; i < address.length(); i++)
+                if (address.charAt(i) == ':')
+                    colons++;
+            if (colons > 2)
+                throw new IOException("cannot parse cot_streams address: "
+                        + address + " (an IPv6 literal needs brackets,"
+                        + " e.g. [::1]:8089)");
+            String[] parts = address.split(":", 3);
+            if (parts.length < 2 || parts[0].isEmpty())
+                throw new IOException("cannot parse cot_streams address: "
+                        + address);
+            host = parts[0];
+            tail = ":" + parts[1] + (parts.length == 3 ? ":" + parts[2] : "");
+        }
+        if (!tail.startsWith(":"))
+            throw new IOException("cannot parse cot_streams address"
+                    + " (no port): " + address);
+        String rest = tail.substring(1);   // port or port:proto
+        int protoAt = rest.indexOf(':');
+        String portPart = protoAt >= 0 ? rest.substring(0, protoAt) : rest;
+        String proto = protoAt >= 0 ? rest.substring(protoAt + 1) : null;
+        int port;
+        try {
+            port = Integer.parseInt(portPart);
+        } catch (NumberFormatException e) {
+            throw new IOException("cannot parse cot_streams port: " + address);
+        }
+        if (port < 1 || port > 65535)
+            throw new IOException("cot_streams port out of range (1-65535): "
+                    + port + " in " + address);
+        boolean ssl;
+        if (proto == null || proto.isEmpty()) {
+            ssl = false;
+        } else {
+            String p = proto.toLowerCase(Locale.US);
+            if (p.equals("ssl") || p.equals("tls"))
+                ssl = true;
+            else if (p.equals("tcp"))
+                ssl = false;
+            else
+                throw new IOException("unsupported cot_streams proto '"
+                        + proto + "' in " + address);
+        }
+        return new EndPoint(host, port, ssl);
     }
 
     /** Refuse path-traversal entry names (Zip-Slip) before anything touches disk. */
@@ -263,12 +358,16 @@ public final class DataPackage {
         }
     }
 
-    /** Extract one entry into certDir: basename only, canonically checked. */
+    /**
+     * Extract one entry into certDir: basename only, canonically checked.
+     * Only p12s reach here today, and checkEntryName has already run on each
+     * in the scan loop — if extraction ever widens past p12s, the name check
+     * must move with it (#32).
+     */
     private static File extract(ZipFile zip, ZipEntry entry, File certDir)
             throws IOException {
         String name = entry.getName();
-        int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
-        String base = slash >= 0 ? name.substring(slash + 1) : name;
+        String base = baseName(name);
         File target = new File(certDir, base);
         if (!target.getCanonicalPath()
                 .startsWith(certDir.getCanonicalPath() + File.separator))
@@ -293,6 +392,12 @@ public final class DataPackage {
             throw e;
         }
         return target;
+    }
+
+    /** The basename of a zip entry name (either slash); nothing else survives. */
+    private static String baseName(String name) {
+        int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+        return slash >= 0 ? name.substring(slash + 1) : name;
     }
 
     /**

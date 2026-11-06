@@ -64,6 +64,15 @@ public final class DataPackageSelfTest {
         return out;
     }
 
+    /** A minimal plaintext package whose only content is one addressN value. */
+    private static File addressOnly(File work, String name, String address)
+            throws IOException {
+        String xml = "<preferences><preference name=\"cot_streams\">"
+                + "<entry key=\"address0\">" + address + "</entry>"
+                + "</preference></preferences>";
+        return writeZip(new File(work, name), xml, new String[0], new byte[0][]);
+    }
+
     private static final String VALID_PREF =
             "<preferences>"
             + "<preference version=\"1\" name=\"cot_streams\">"
@@ -215,6 +224,67 @@ public final class DataPackageSelfTest {
         check(p.certPath == null && p.caPath == null,
                 "plaintext dp yields no certs");
         check(p.certPass == null, "plaintext dp yields no certPass");
+
+        // --- #32 edge cases: IPv6, port range, proto tokens, basenames --
+        DataPackage.Resolved v6 = DataPackage.open(
+                addressOnly(work, "v6.dp", "[::1]:8089:ssl"),
+                new File(work, "d-v6"));
+        check("::1".equals(v6.host) && v6.port == 8089 && v6.ssl,
+                "bracketed IPv6 literal parses; stored unbracketed for commo");
+        DataPackage.Resolved v6p = DataPackage.open(
+                addressOnly(work, "v6-plain.dp", "[::1]:8087"),
+                new File(work, "d-v6p"));
+        check("::1".equals(v6p.host) && v6p.port == 8087 && !v6p.ssl,
+                "bracketed IPv6 literal without a proto is plaintext");
+        msg = resolveMustFail(addressOnly(work, "v6-bare.dp", "::1:8089"),
+                new File(work, "d-v6b"));
+        check(msg != null && msg.contains("brackets"),
+                "unbracketed IPv6 told to use brackets, not a bogus port error: "
+                        + msg);
+
+        msg = resolveMustFail(addressOnly(work, "port0.dp", "host.example:0"),
+                new File(work, "d-port0"));
+        check(msg != null && msg.contains("out of range"),
+                "port 0 refused by the range check: " + msg);
+        msg = resolveMustFail(addressOnly(work, "portbig.dp", "host.example:99999"),
+                new File(work, "d-portbig"));
+        check(msg != null && msg.contains("out of range"),
+                "port 99999 refused by the range check: " + msg);
+
+        msg = resolveMustFail(addressOnly(work, "dtls.dp", "host.example:8089:dtls"),
+                new File(work, "d-dtls"));
+        check(msg != null && msg.contains("unsupported cot_streams proto"),
+                "dtls refused, no longer mislabeled ssl: " + msg);
+        DataPackage.Resolved tcp = DataPackage.open(
+                addressOnly(work, "tcp.dp", "host.example:8089:tcp"),
+                new File(work, "d-tcp"));
+        check("host.example".equals(tcp.host) && tcp.port == 8089 && !tcp.ssl,
+                "exact proto tcp means plaintext");
+        DataPackage.Resolved tls = DataPackage.open(
+                addressOnly(work, "tls.dp", "host.example:8089:TLS"),
+                new File(work, "d-tls"));
+        check(tls.ssl, "exact proto TLS (any case) means ssl");
+
+        String collide = "<preferences>"
+                + "<preference name=\"cot_streams\">"
+                + "<entry key=\"address0\">c.example.test:8089</entry>"
+                + "</preference>"
+                + "<preference name=\"plugin_firecrypt\">"
+                + "<entry key=\"CAFile\">certs/b/me.p12</entry>"
+                + "<entry key=\"ClientFile\">certs/a/me.p12</entry>"
+                + "</preference></preferences>";
+        File collideDp = writeZip(new File(work, "collide.dp"), collide,
+                new String[] {"certs/a/me.p12", "certs/b/me.p12"},
+                new byte[][] {blob, blob});
+        File dCollide = new File(work, "d-collide");
+        msg = resolveMustFail(collideDp, dCollide);
+        check(msg != null && msg.contains("share one basename"),
+                "same-basename p12 pair refused, not silently overwritten: "
+                        + msg);
+        String[] leftCollide = dCollide.list();
+        check(leftCollide != null && leftCollide.length == 0,
+                "refused collision leaves the cert dir empty: "
+                        + Arrays.toString(leftCollide));
 
         // --- --datapackage precedence: flags > package > defaults ------
         // ConnectOptions.resolve is the merge HeadlessCLI runs (moved there

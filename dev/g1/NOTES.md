@@ -426,6 +426,12 @@ exit 2.
   `preference.pref`, 64 MiB per PKCS#12 — so an oversize fails with a
   one-line `exceeds N bytes` message (exit 2) instead of filling the disk or
   the heap, and a refused cert leaves no partial file in the cert dir; the
+  address line (#32) takes a bracketed IPv6 literal and stores it unbracketed
+  (what commo's addStreamingInterface takes), range-checks the port to
+  1–65535 on both the package and the `--connect` paths, matches the proto
+  token exactly (`ssl`/`tls`/`tcp`; `dtls` is refused instead of mislabeled
+  ssl), and refuses a client/truststore pair sharing one basename — the cert
+  dir keeps one flat file per basename, so the two could not coexist; the
   resolved line never prints the password.
 - **The key names are verified against the fixture only, not yet against a
   real OpenTAKServer package** (none existed on this machine). The parser is

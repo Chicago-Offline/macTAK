@@ -6,6 +6,11 @@ cmake_minimum_required(VERSION 3.5)
 cmake_policy(SET CMP0079 NEW)
 project(takengine LANGUAGES C CXX)
 
+# NOTE (post-G0 audit): SRC is the G0-era absolute path of this repo,
+# recorded verbatim from the spike run — the repo has since moved, and the
+# live build generates its own parameterized wrapper (dev/g1/build-native.sh,
+# @ROOT@/@WORK@ substitution), so this file is evidence only; nothing
+# consumes it and the path is intentionally left as recorded.
 set(SRC /Users/meskes/.cline/data/workspaces/chat/macTAK)
 
 add_subdirectory(

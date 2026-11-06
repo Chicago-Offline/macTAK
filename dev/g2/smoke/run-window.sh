@@ -26,6 +26,7 @@ ANGLE="$G2/angle-dist"
 for arg in "$@"; do
   case "$arg" in
     --compile-only) COMPILE_ONLY=1 ;;
+    --*) echo "FATAL: unknown option $arg (usage: run-window.sh [--compile-only] [angle-dist-dir])" >&2; exit 1 ;;
     *) ANGLE="$arg" ;;
   esac
 done

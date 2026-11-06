@@ -10,9 +10,12 @@
 // was linked against (@rpath/libGLESv2.dylib staged in native-dist) so that
 // the context created here is the one the engine's GL calls land in.
 //
-// Single pbuffer, single context, no sharing: enough for offscreen frames.
-// Window surfaces (CAMetalLayer via EGL_ANGLE_metal_texture_client_buffer
-// or eglCreateWindowSurface on a CALayer) are the G2.2 step.
+// One surface, one context, no sharing. init() makes a pbuffer (offscreen
+// frames, the CI canary); createWindowSurface() swaps it for a window surface
+// on a CAMetalLayer (proven by dev/g2/smoke/egl-triangle-window.m, M3.0) on
+// the SAME display, config and context — only the surface changes. resize()
+// adopts a new size after the host resizes the layer's drawableSize; swap()
+// presents the back buffer.
 #include <jni.h>
 
 #include <dlfcn.h>
@@ -47,6 +50,9 @@ namespace {
         EGLBoolean (*Terminate)(EGLDisplay) = nullptr;
         EGLBoolean (*ChooseConfig)(EGLDisplay, const EGLint *, EGLConfig *, EGLint, EGLint *) = nullptr;
         EGLSurface (*CreatePbufferSurface)(EGLDisplay, EGLConfig, const EGLint *) = nullptr;
+        EGLSurface (*CreateWindowSurface)(EGLDisplay, EGLConfig, EGLNativeWindowType, const EGLint *) = nullptr;
+        EGLBoolean (*SwapBuffers)(EGLDisplay, EGLSurface) = nullptr;
+        EGLBoolean (*QuerySurface)(EGLDisplay, EGLSurface, EGLint, EGLint *) = nullptr;
         EGLBoolean (*DestroySurface)(EGLDisplay, EGLSurface) = nullptr;
         EGLBoolean (*BindAPI)(EGLenum) = nullptr;
         EGLContext (*CreateContext)(EGLDisplay, EGLConfig, EGLContext, const EGLint *) = nullptr;
@@ -68,6 +74,8 @@ namespace {
         EGLDisplay dpy = EGL_NO_DISPLAY;
         EGLSurface surf = EGL_NO_SURFACE;
         EGLContext ctx = EGL_NO_CONTEXT;
+        EGLConfig cfg = nullptr;
+        void *nativeWindow = nullptr;   // CAMetalLayer backing the window surface, if one is up
         int width = 0, height = 0;
         char backend[16] = "none";
         char lastError[256] = "";
@@ -96,6 +104,9 @@ namespace {
             && sym(g.eglLib, "eglTerminate", g.Terminate)
             && sym(g.eglLib, "eglChooseConfig", g.ChooseConfig)
             && sym(g.eglLib, "eglCreatePbufferSurface", g.CreatePbufferSurface)
+            && sym(g.eglLib, "eglCreateWindowSurface", g.CreateWindowSurface)
+            && sym(g.eglLib, "eglSwapBuffers", g.SwapBuffers)
+            && sym(g.eglLib, "eglQuerySurface", g.QuerySurface)
             && sym(g.eglLib, "eglDestroySurface", g.DestroySurface)
             && sym(g.eglLib, "eglBindAPI", g.BindAPI)
             && sym(g.eglLib, "eglCreateContext", g.CreateContext)
@@ -122,6 +133,7 @@ namespace {
             if (g.Terminate) g.Terminate(g.dpy);
         }
         g.dpy = EGL_NO_DISPLAY; g.surf = EGL_NO_SURFACE; g.ctx = EGL_NO_CONTEXT;
+        g.cfg = nullptr; g.nativeWindow = nullptr;
         // The dylibs stay loaded: the engine is linked against libGLESv2 anyway.
     }
 
@@ -168,6 +180,45 @@ namespace {
         ctl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, GL_TRUE);
         cb(debugCallback, nullptr);
     }
+
+    // M3.1: adopt width/height for the current surface after the host changed
+    // the backing size (the layer's drawableSize). ANGLE's Metal window
+    // surfaces track the layer, so eglQuerySurface should already report the
+    // new size; if it still reports the old one, rebuild the window surface
+    // on the same layer, config and context. Returns false with lastError set.
+    bool adoptSurfaceSize(int width, int height) {
+        EGLint qw = 0, qh = 0;
+        if (g.QuerySurface(g.dpy, g.surf, EGL_WIDTH, &qw)
+                && g.QuerySurface(g.dpy, g.surf, EGL_HEIGHT, &qh)
+                && qw == width && qh == height) {
+            g.width = width; g.height = height;
+            return true;
+        }
+        if (!g.nativeWindow) { setError("eglQuerySurface: surface reports a different size"); return false; }
+        if (!g.MakeCurrent(g.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT)) {
+            setError("resize: eglMakeCurrent(release)");
+            return false;
+        }
+        const EGLSurface rebuilt = g.CreateWindowSurface(g.dpy, g.cfg, (EGLNativeWindowType)g.nativeWindow, nullptr);
+        if (rebuilt == EGL_NO_SURFACE) {
+            setError("resize: eglCreateWindowSurface");
+            if (!g.MakeCurrent(g.dpy, g.surf, g.surf, g.ctx))
+                std::fprintf(stderr, "mactak_egl: resize fallback left no current surface\n");
+            return false;
+        }
+        g.DestroySurface(g.dpy, g.surf);
+        g.surf = rebuilt;
+        if (!g.MakeCurrent(g.dpy, g.surf, g.surf, g.ctx)) { setError("resize: eglMakeCurrent"); return false; }
+        qw = 0; qh = 0;
+        if (!g.QuerySurface(g.dpy, g.surf, EGL_WIDTH, &qw)
+                || !g.QuerySurface(g.dpy, g.surf, EGL_HEIGHT, &qh)
+                || qw != width || qh != height) {
+            setError("resize: rebuilt surface did not take the new size");
+            return false;
+        }
+        g.width = width; g.height = height;
+        return true;
+    }
 }
 
 extern "C" {
@@ -208,8 +259,10 @@ JNIEXPORT jboolean JNICALL Java_mactak_render_NativeEgl_init
     if (!g.Initialize(g.dpy, &major, &minor)) { setError("eglInitialize"); g.dpy = EGL_NO_DISPLAY; return JNI_FALSE; }
 
     // Engine needs depth + stencil (GLGlobe clears all three buffers).
+    // WINDOW_BIT on the same config: createWindowSurface() reuses this config
+    // for the CAMetalLayer surface (ANGLE's Metal configs carry both bits).
     const EGLint cfgAttrs[] = {
-        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT | EGL_WINDOW_BIT,
         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
         EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
         EGL_DEPTH_SIZE, 24, EGL_STENCIL_SIZE, 8,
@@ -217,6 +270,7 @@ JNIEXPORT jboolean JNICALL Java_mactak_render_NativeEgl_init
     };
     EGLConfig cfg; EGLint n = 0;
     if (!g.ChooseConfig(g.dpy, cfgAttrs, &cfg, 1, &n) || n < 1) { setError("eglChooseConfig"); teardown(); return JNI_FALSE; }
+    g.cfg = cfg;
 
     const EGLint pbAttrs[] = { EGL_WIDTH, width, EGL_HEIGHT, height, EGL_NONE };
     g.surf = g.CreatePbufferSurface(g.dpy, cfg, pbAttrs);
@@ -249,6 +303,71 @@ JNIEXPORT jboolean JNICALL Java_mactak_render_NativeEgl_release(JNIEnv *, jclass
 {
     if (g.dpy == EGL_NO_DISPLAY) return JNI_FALSE;
     return g.MakeCurrent(g.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT) ? JNI_TRUE : JNI_FALSE;
+}
+
+// M3.1: replace the init() pbuffer with a window surface on a CAMetalLayer
+// (the native window ANGLE's Metal backend takes; see
+// dev/g2/smoke/egl-triangle-window.m). Same display, config and context —
+// only the surface changes. On failure the pbuffer is recreated so the
+// context keeps a valid fallback surface.
+JNIEXPORT jboolean JNICALL Java_mactak_render_NativeEgl_createWindowSurface
+  (JNIEnv *, jclass, jlong layerPtr, jint width, jint height)
+{
+    if (g.dpy == EGL_NO_DISPLAY || g.ctx == EGL_NO_CONTEXT) {
+        setError("createWindowSurface: not initialized");
+        return JNI_FALSE;
+    }
+    if (!layerPtr || width <= 0 || height <= 0) {
+        setError("createWindowSurface: bad arguments");
+        return JNI_FALSE;
+    }
+    auto *layer = reinterpret_cast<void *>(layerPtr);
+    if (!g.MakeCurrent(g.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT)) {
+        setError("createWindowSurface: eglMakeCurrent(release)");
+        return JNI_FALSE;
+    }
+    const EGLSurface win = g.CreateWindowSurface(g.dpy, g.cfg, (EGLNativeWindowType)layer, nullptr);
+    if (win == EGL_NO_SURFACE) {
+        setError("eglCreateWindowSurface");
+        const EGLint pbAttrs[] = { EGL_WIDTH, g.width, EGL_HEIGHT, g.height, EGL_NONE };
+        const EGLSurface pb = g.CreatePbufferSurface(g.dpy, g.cfg, pbAttrs);
+        if (pb == EGL_NO_SURFACE) {
+            std::fprintf(stderr, "mactak_egl: window surface failed; pbuffer restore failed too\n");
+        } else {
+            if (g.surf != EGL_NO_SURFACE) g.DestroySurface(g.dpy, g.surf);
+            g.surf = pb;
+            if (!g.MakeCurrent(g.dpy, g.surf, g.surf, g.ctx))
+                std::fprintf(stderr, "mactak_egl: pbuffer restored but not made current\n");
+        }
+        return JNI_FALSE;
+    }
+    if (g.surf != EGL_NO_SURFACE) g.DestroySurface(g.dpy, g.surf);
+    g.surf = win;
+    g.nativeWindow = layer;
+    if (!g.MakeCurrent(g.dpy, g.surf, g.surf, g.ctx)) {
+        setError("createWindowSurface: eglMakeCurrent");
+        return JNI_FALSE;
+    }
+    if (!adoptSurfaceSize(width, height)) return JNI_FALSE;
+    g.lastError[0] = '\0';
+    return JNI_TRUE;
+}
+
+// M3.1: adopt a new size after the host resized the layer's drawableSize.
+JNIEXPORT jboolean JNICALL Java_mactak_render_NativeEgl_resize
+  (JNIEnv *, jclass, jint width, jint height)
+{
+    if (g.dpy == EGL_NO_DISPLAY || g.surf == EGL_NO_SURFACE) { setError("resize: no surface"); return JNI_FALSE; }
+    if (width <= 0 || height <= 0) { setError("resize: bad arguments"); return JNI_FALSE; }
+    return adoptSurfaceSize(width, height) ? JNI_TRUE : JNI_FALSE;
+}
+
+// M3.1: present the window surface's back buffer to its CAMetalLayer.
+JNIEXPORT jboolean JNICALL Java_mactak_render_NativeEgl_swap(JNIEnv *, jclass)
+{
+    if (g.dpy == EGL_NO_DISPLAY || g.surf == EGL_NO_SURFACE) { setError("swap: no surface"); return JNI_FALSE; }
+    if (!g.SwapBuffers(g.dpy, g.surf)) { setError("eglSwapBuffers"); return JNI_FALSE; }
+    return JNI_TRUE;
 }
 
 JNIEXPORT jboolean JNICALL Java_mactak_render_NativeEgl_isCurrent(JNIEnv *, jclass)

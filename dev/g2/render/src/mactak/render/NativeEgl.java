@@ -3,7 +3,8 @@ package mactak.render;
 /**
  * EGL on ANGLE (Metal) for the engine on macOS. Binding is
  * {@code dev/g2/jni-extra/mactak_egl.cpp} inside {@code libtakenginejni.dylib}.
- * One pbuffer, one ES3 context; the libGLESv2 passed to {@link #init} must be
+ * One surface (the {@link #init} pbuffer, switchable to a CAMetalLayer window
+ * surface), one ES3 context; the libGLESv2 passed to {@link #init} must be
  * the one the engine was linked against (staged beside it in native-dist).
  */
 final class NativeEgl {
@@ -21,6 +22,16 @@ final class NativeEgl {
     static native boolean makeCurrent();
 
     static native boolean release();
+
+    /** Replace the pbuffer with a CAMetalLayer-backed window surface (M3.1):
+     *  same display, config and context; {@code layerPtr} is the CAMetalLayer*. */
+    static native boolean createWindowSurface(long layerPtr, int width, int height);
+
+    /** Adopt a new size after the host resized the layer's drawableSize. */
+    static native boolean resize(int width, int height);
+
+    /** Present the back buffer (window surfaces). */
+    static native boolean swap();
 
     static native boolean isCurrent();
 

@@ -1,23 +1,40 @@
 # Supply-chain hygiene for CI's Homebrew dependency set.
 #
-# Gate = Brewfile.lock.json freshness: the checked-in Brewfile lists exactly
-# the packages ci.yml brew-installs (union of the engine + comms install
-# lines). Note: Homebrew removed built-in Brewfile.lock.json generation
-# (homebrew-bundle #1509, Nov 2024), so the lock is regenerated here with a
-# deterministic script (name → version per entry) and diffed against the
-# committed file; drift fails the job. `brew bundle check` asserts the
-# Brewfile is satisfiable. osv-scanner sweeps the repo against OSV.
+# Two jobs:
+#
+# brewfile-lock (macos-26) — Gate = Brewfile.lock.json freshness: the
+# checked-in Brewfile lists exactly the packages ci.yml brew-installs
+# (union of the engine + comms install lines), and a step below enforces
+# that union against every workflow's brew install lines — a package added
+# there without a Brewfile + lock update fails this job instead of
+# escaping the lock and the osv scan. Note: Homebrew removed built-in
+# Brewfile.lock.json generation (homebrew-bundle #1509, Nov 2024), so the
+# lock is regenerated here with a deterministic script (name → version
+# per entry) and diffed against the committed file; drift fails the job.
+# `brew bundle check` asserts the Brewfile is satisfiable.
+#
+# osv-scan (ubuntu-latest) — osv-scanner sweeps the repo against OSV.
+# google/osv-scanner-action is a container action, Linux-only: on the
+# macos runner it dies with "Container action is only supported on Linux"
+# (PRs #7, #11), the scan writes no results, and the fail-loud gate goes
+# red. The scan and its gate run together here, on a Linux runner, where
+# the action can actually run; everything brew-related stays on macos,
+# where the dep set is consumed.
 name: Supply chain
 
 on:
   pull_request:
     paths:
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/cot-roundtrip.yml'
       - '.github/workflows/supply-chain.yml'
       - 'Brewfile'
       - 'Brewfile.lock.json'
   push:
     branches: [main]
     paths:
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/cot-roundtrip.yml'
       - '.github/workflows/supply-chain.yml'
       - 'Brewfile'
       - 'Brewfile.lock.json'
@@ -28,7 +45,7 @@ permissions:
 
 jobs:
   brewfile-lock:
-    name: Brewfile.lock.json freshness + osv-scanner
+    name: Brewfile.lock.json freshness
     runs-on: macos-26
     timeout-minutes: 15
     steps:
@@ -36,6 +53,51 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Fail if the Brewfile drifts from the workflows' brew install lines
+        run: |
+          # The Brewfile is the union of the brew install lines in ci.yml and
+          # cot-roundtrip.yml. A package added to a workflow without a
+          # Brewfile (+ lock) update must fail here, not quietly escape the
+          # lock regeneration and the osv scan. Stdlib re over the raw YAML
+          # — the two-line folded scalars the install lines use included —
+          # because PyYAML is not guaranteed on the runner image.
+          python3 - <<'PY'
+          import re, sys, pathlib
+          brew = sorted(re.findall(r'^brew\s+"([^"]+)"',
+                       pathlib.Path("Brewfile").read_text(), re.M))
+          pkgs = set()
+          for wf in sorted(pathlib.Path(".github/workflows").glob("*.yml")):
+              lines = wf.read_text().splitlines()
+              for i, line in enumerate(lines):
+                  m = re.match(r'^(\s*)run:\s*(.*)$', line)
+                  if not m:
+                      continue
+                  indent, val = len(m.group(1)), m.group(2).strip()
+                  if val.startswith("brew install"):
+                      pkgs.update(val.split()[2:])
+                  elif val == ">":   # folded scalar: its more-indented lines
+                      block = []
+                      for cont in lines[i + 1:]:
+                          if (not cont.strip()
+                                  or len(cont) - len(cont.lstrip()) <= indent
+                                  or re.match(r'\s*-\s', cont)):
+                              break
+                          block.append(cont.strip())
+                      block = " ".join(block)
+                      if "brew install" in block:
+                          pkgs.update(block.split("brew install", 1)[1].split())
+          if brew != sorted(pkgs):
+              print("::error::Brewfile != union of the workflows' brew install lines")
+              only_brew = sorted(set(brew) - pkgs)
+              only_wf = sorted(pkgs - set(brew))
+              if only_brew:
+                  print("  in Brewfile only:  " + " ".join(only_brew))
+              if only_wf:
+                  print("  in workflows only: " + " ".join(only_wf))
+              sys.exit(1)
+          print(f"Brewfile matches the workflows' brew install lines ({len(brew)} packages)")
+          PY
 
       - name: Install Brewfile dependencies
         run: brew bundle install --file Brewfile
@@ -67,6 +129,20 @@ jobs:
           fi
           rm Brewfile.lock.json.new
           echo "Brewfile.lock.json is up to date"
+
+  osv-scan:
+    name: OSV vulnerability scan
+    # google/osv-scanner-action is a container action — Linux-only. On the
+    # macos runner it dies with "Container action is only supported on
+    # Linux" (PRs #7, #11), so the scan and its fail-loud gate run here,
+    # on ubuntu, where the action works; see the file header.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: OSV vulnerability scan
         uses: google/osv-scanner-action/osv-scanner-action@0a65f82af05cd58cf587827b0bb0489548c18346 # v2.7.0

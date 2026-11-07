@@ -59,18 +59,26 @@ Java_mactak_render_WindowHost_open(JNIEnv *env, jclass cls, jint width, jint hei
     if (g_layer) { setError("layer host already open"); return 0; }
     if (width <= 0 || height <= 0) { setError("bad size"); return 0; }
     /* No Metal device (no GPU): eglCreateWindowSurface would misreport that
-     * as a surface failure (M3.0 finding #42). Bail here instead. */
-    if (!MTLCreateSystemDefaultDevice()) {
+     * as a surface failure (M3.0 finding #42). Bail here instead. One
+     * MTLCreateSystemDefaultDevice() call, checked, handed to the layer —
+     * asking the system twice leaks a device ref per open(). */
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    if (!device) {
         setError("no Metal device (MTLCreateSystemDefaultDevice returned nil)");
         return 0;
     }
 
     @autoreleasepool {
+        /* Compiled -fobjc-arc (build-window-host.sh): [CAMetalLayer layer]
+         * is autoreleased, so under MRC this pool draining at the return
+         * deallocated the layer and EGL was handed a dead pointer — the
+         * static below kept only its bare address. Under ARC the static
+         * (and, once ANGLE retains it, the EGL surface) owns the layer. */
         /* The harness pins contentsScale to 1 so drawableSize equals the
          * pixel size the smoke gates on; the points-x-backing-scale
          * calibration is M3.3's business (NOTES.md §"M3 design"). */
         CAMetalLayer *layer = [CAMetalLayer layer];
-        layer.device = MTLCreateSystemDefaultDevice();
+        layer.device = device;
         layer.contentsScale = 1.0;
         /* A detached layer has zero bounds, and ANGLE reads the window
          * surface's size from the layer (bounds x contentsScale): give it

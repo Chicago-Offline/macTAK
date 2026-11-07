@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 /* ANGLE platform enums: the pinned Khronos registry in src/khronos predates
  * EGL_ANGLE_platform_angle_metal. Values match angle/include/EGL/eglext_angle.h. */
@@ -149,13 +150,26 @@ int main(int argc, char **argv) {
 
     if (ppm) {
         FILE *f = fopen(ppm, "wb");
-        if (f) {
-            fprintf(f, "P6\n%d %d\n255\n", W, H);
-            for (int y = H - 1; y >= 0; y--)          /* GL is bottom-up */
-                for (int x = 0; x < W; x++) fwrite(&px[(y * W + x) * 4], 1, 3, f);
-            fclose(f);
-            printf("egl-triangle: wrote %s\n", ppm);
+        if (!f) {
+            /* The renderback artifact is the point when MACTAK_SMOKE_PPM is
+             * set; a silently skipped write turned "smoke passed" into
+             * "smoke passed, no evidence". Warn, then gate. */
+            fprintf(stderr, "egl-triangle: WARN: fopen(%s) failed (%s) — renderback artifact missing\n",
+                    ppm, strerror(errno));
+            return fail("ppm renderback (open)");
         }
+        fprintf(f, "P6\n%d %d\n255\n", W, H);
+        int writeErr = 0;
+        for (int y = H - 1; y >= 0 && !writeErr; y--)   /* GL is bottom-up */
+            for (int x = 0; x < W; x++)
+                if (fwrite(&px[(y * W + x) * 4], 1, 3, f) != 3) { writeErr = 1; break; }
+        if (ferror(f)) writeErr = 1;
+        if (fclose(f) != 0) writeErr = 1;
+        if (writeErr) {
+            fprintf(stderr, "egl-triangle: WARN: short write to %s — renderback artifact truncated\n", ppm);
+            return fail("ppm renderback (write)");
+        }
+        printf("egl-triangle: wrote %s\n", ppm);
     }
 
     eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);

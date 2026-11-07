@@ -89,7 +89,15 @@ for lib in libEGL libGLESv2; do
     echo "FATAL: $in has no arm64 slice" >&2; exit 1
   fi
   chmod u+w "$out"
-  install_name_tool -id "@rpath/$lib.dylib" "$out" 2>/dev/null
+  # The install-name rewrite is the point of the staging: Electron's copies
+  # carry "./x" ids, and a silently skipped rewrite leaves them for dyld to
+  # trip over far from here. Run install_name_tool with its stderr intact
+  # and assert the result (otool -D's second line, first field) instead of
+  # discarding its output.
+  install_name_tool -id "@rpath/$lib.dylib" "$out"
+  got_id="$(otool -D "$out" | awk 'NR == 2 { print $1 }')"
+  [[ "$got_id" == "@rpath/$lib.dylib" ]] \
+    || { echo "FATAL: install-name rewrite failed for $out (otool -D: ${got_id:-none})" >&2; exit 1; }
   codesign --force --sign - "$out" >/dev/null 2>&1
   log "staged $out ($(stat -f %z "$out") bytes)"
 done

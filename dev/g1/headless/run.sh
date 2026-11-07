@@ -85,7 +85,21 @@ bash "$HERE/atak-headless" --connect "$TAK_HOST:$TAK_PORT" ${SSL[@]+"${SSL[@]}"}
     --uid "$UID_A" --callsign "$CS_A" --duration "$DURATION" --db "$DB_A" \
     > "$LOG_A" 2>&1 &
 pid_a=$!
-sleep 1   # A is registered before B's first (and only) marker goes out
+# A is registered before B's first (and only) marker goes out. Wait for A's
+# actual "iface-up" instead of a fixed 1s — the sleep raced the launcher's
+# compile (latent since G1.4, observed 2026-11-06 in cot-roundtrip when
+# ConnectOptions.java pushed the compile past the offset). Bounded: 90 s,
+# then fail loudly with A's log rather than hanging or racing.
+deadline=$((SECONDS + 90))
+until grep -q 'headless: iface-up' "$LOG_A" 2>/dev/null; do
+  if (( SECONDS >= deadline )); then
+    echo "run.sh: A never reached iface-up within 90s — A's log:" >&2
+    tail -n 40 "$LOG_A" >&2 || true
+    kill "$pid_a" 2>/dev/null || true
+    exit 1
+  fi
+  sleep 0.2
+done
 bash "$HERE/atak-headless" --connect "$TAK_HOST:$TAK_PORT" ${SSL[@]+"${SSL[@]}"} \
     --uid "$UID_B" --callsign "$CS_B" --duration "$DURATION" --send-marker "$LAT" "$LON" --db "$DB_B" \
     > "$LOG_B" 2>&1

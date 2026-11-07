@@ -22,7 +22,11 @@ OUT="$G2/build/render-classes"
 for f in libtakengine.dylib libtakenginejni.dylib libEGL.dylib libGLESv2.dylib; do
   [[ -f "$DIST/$f" ]] || { echo "render/run.sh: $f missing in $DIST — run: MACTAK_GLES=angle bash dev/g1/build-native.sh" >&2; exit 2; }
 done
-otool -L "$DIST/libtakengine.dylib" | grep -q '@rpath/libGLESv2.dylib' \
+# Capture, then grep: `otool | grep -q` under pipefail can die of SIGPIPE
+# (grep quits on the first match, otool gets EPIPE → exit 141) and read as
+# "no match" — the false-failure trap recorded in fetch-angle.sh (G1 trap 2).
+linkage="$(otool -L "$DIST/libtakengine.dylib")"
+grep -q '@rpath/libGLESv2.dylib' <<<"$linkage" \
   || { echo "render/run.sh: libtakengine is linked against the GLES stub, not ANGLE — rebuild with MACTAK_GLES=angle" >&2; exit 2; }
 
 JDK="${JAVA_HOME:-$("/usr/libexec/java_home" -v 1.8 2>/dev/null || true)}"
@@ -38,6 +42,16 @@ for a in "$@"; do
     WIN_HOST_ARGS=(--window-host "$WIN_HOST")
     break
   fi
+done
+
+# RenderSmoke writes --out through ImageIO, which does not create parent
+# directories, and dev/g2/build is gitignored — a clean checkout's first
+# `--out dev/g2/build/…` (make test-render, CI) would die on the PNG write.
+# Make the parent here, before Java runs.
+prev=""
+for a in "$@"; do
+  if [[ "$prev" == "--out" ]]; then mkdir -p "$(dirname "$a")"; fi
+  prev="$a"
 done
 
 # mavenLocal first, else the committed transplants — same contract as dev/g1.

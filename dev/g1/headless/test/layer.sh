@@ -34,6 +34,18 @@ run_one() {   # run_one FILE EXPECTED_FEATURES
   sed 's/^/    /' "$log"
 }
 
+# One GDAL-conversion leg. An ogr2ogr failure must be LOUD: the old
+# `ogr2ogr ... && run_one ...` form silently dropped the leg on a failed
+# conversion, and the suite still printed PASS with quietly shrunk coverage.
+convert_run() {   # convert_run FMT OUTFILE EXPECTED_FEATURES SRC [extra ogr2ogr args...]
+  local fmt="$1" out="$2" n="$3"; shift 3
+  if ogr2ogr -f "$fmt" "$out" "$@" >/dev/null 2>&1; then
+    run_one "$out" "$n"
+  else
+    echo "[layer-test] FAIL ogr2ogr -f $fmt conversion of $* — leg cannot run"; rc=1
+  fi
+}
+
 if [[ $# -ge 1 ]]; then
   # FILE          asserts exactly 1 feature (sanity-check a single-feature file)
   # FILE:N        asserts exactly N features (a 5-feature file with a bare
@@ -58,12 +70,9 @@ else
   if command -v ogr2ogr >/dev/null 2>&1; then
     # same features through three more GDAL drivers; shapefiles are single-geometry,
     # so only the points survive the conversion (the OGR driver picks one layer type).
-    ogr2ogr -f GPKG "$WORK/sf-landmarks.gpkg" "$FIXTURE" >/dev/null 2>&1 \
-      && run_one "$WORK/sf-landmarks.gpkg" "$FIXTURE_FEATURES"
-    ogr2ogr -f KML "$WORK/sf-landmarks.kml" "$FIXTURE" >/dev/null 2>&1 \
-      && run_one "$WORK/sf-landmarks.kml" "$FIXTURE_FEATURES"
-    ogr2ogr -f 'ESRI Shapefile' "$WORK/sf-points.shp" "$FIXTURE" -where "kind = 'poi'" >/dev/null 2>&1 \
-      && run_one "$WORK/sf-points.shp" 3
+    convert_run GPKG "$WORK/sf-landmarks.gpkg" "$FIXTURE_FEATURES" "$FIXTURE"
+    convert_run KML "$WORK/sf-landmarks.kml" "$FIXTURE_FEATURES" "$FIXTURE"
+    convert_run 'ESRI Shapefile' "$WORK/sf-points.shp" 3 "$FIXTURE" -where "kind = 'poi'"
   else
     echo "[layer-test] ogr2ogr not on PATH; GPKG/KML/SHP legs skipped"
   fi

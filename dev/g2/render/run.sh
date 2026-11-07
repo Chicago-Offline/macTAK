@@ -73,7 +73,10 @@ BC_SHA256=fa0041a36f9f20af3c6b8dbf6eb49a969e2c9cc029049d61acc526ba3247b3ef
 BC_JAR="$(jar "$M2/org/bouncycastle/bcprov-jdk15on/$BC_VER/bcprov-jdk15on-$BC_VER.jar" "$G2/build/lib/bcprov-jdk15on-$BC_VER.jar")"
 if [[ ! -f "$BC_JAR" ]]; then
   mkdir -p "$(dirname "$BC_JAR")"
-  curl -fsSL -o "$BC_JAR.tmp" "https://repo1.maven.org/maven2/org/bouncycastle/bcprov-jdk15on/$BC_VER/bcprov-jdk15on-$BC_VER.jar"
+  # --retry: same rationale as fetch-angle.sh — a single-shot Maven Central
+  # fetch flakes CI on a transient 5xx; retry, then let the checksum gate judge.
+  curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o "$BC_JAR.tmp" \
+    "https://repo1.maven.org/maven2/org/bouncycastle/bcprov-jdk15on/$BC_VER/bcprov-jdk15on-$BC_VER.jar"
   echo "$BC_SHA256  $BC_JAR.tmp" | shasum -a 256 -c - >/dev/null || { rm -f "$BC_JAR.tmp"; echo "render/run.sh: bcprov checksum mismatch" >&2; exit 2; }
   mv "$BC_JAR.tmp" "$BC_JAR"
 fi

@@ -10,10 +10,13 @@ on:
   pull_request:
     paths:
       - 'dev/g1/**'
+      - '.github/workflows/cot-roundtrip.yml'
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
       - 'dev/g1/**'
+      - '.github/workflows/cot-roundtrip.yml'
 
 permissions:
   contents: read

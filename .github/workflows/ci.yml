@@ -190,6 +190,10 @@ jobs:
         if: needs.changes.outputs.changed == 'true'
         run: make check-gen-gles-shim
 
+      - name: Engine shadow drift gate (shadowed engine Java == upstream src/ + dev/g1/patches hunk)
+        if: needs.changes.outputs.changed == 'true'
+        run: make check-engine-shadows
+
       - name: Stage ANGLE (pinned Electron release) + EGL/ES3 triangle smoke
         if: needs.changes.outputs.changed == 'true'
         env:

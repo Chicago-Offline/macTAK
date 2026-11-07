@@ -324,6 +324,13 @@ if [[ "$GLES" == angle ]]; then
 else
   cp "$WORK/gles-stub/libGLESv2.dylib" "$OUT/libGLESv2-stub.dylib"
 fi
+# Re-sign the staged copies in place (2026-11-06 incident, dev/g2/NOTES.md
+# §M3.1): re-staged linker-signed dylibs were SIGKILLed on dlopen under macOS
+# provenance enforcement while `codesign -v --strict` still passed; a fresh
+# adhoc signature over the staged file fixes it.
+for f in "$OUT"/*.dylib; do
+  codesign --force --sign - "$f" >/dev/null 2>&1 || die "codesign failed on staged $f"
+done
 
 # --- canary --------------------------------------------------------------
 log "canary 3/3: JVM in-process load (JNI glue)"

@@ -37,7 +37,7 @@ The Team Awareness Kit (TAK) is the geospatial situational-awareness stack used 
 | [`docs/roadmap.md`](docs/roadmap.md) | Gate-gated plan G0–G6 with exit criteria and fallback decision points |
 | [`docs/ci-qa.md`](docs/ci-qa.md) | CI/QA plan: inherited test corpus, CI tiers, golden fixtures, runner strategy |
 | [`docs/pathway-a.md`](docs/pathway-a.md) | WinTAK golden VM: build record, FreeTAKServer round-trip verification, gotchas |
-| [`CHANGELOG.md`](CHANGELOG.md) | Release history by gate — 0.1.0 G0 engine builds, 0.2.0 G1 headless + CoT, 0.3.0 G2 map renders |
+| [`CHANGELOG.md`](CHANGELOG.md) | Release history by gate — 0.1.0 G0 engine builds, 0.2.0 G1 headless + CoT, 0.3.0 G2 map renders, 0.3.1 window surfaces + hardening |
 
 ## Local gates
 

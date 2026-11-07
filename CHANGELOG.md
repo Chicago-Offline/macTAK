@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+- Nothing yet.
+
+## [0.3.1] - 2026-11-07 — G2: window surfaces (M3.0–M3.1) + hardening
+
 ### Added
 
 - `RenderSmoke --window W×H` + `make test-render-window` /
@@ -67,6 +71,58 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   operator set `this->shareWith = this`, so every share after the first
   returned `TE_IllegalState`. `shareTile` has no callers at the pin
   (front/back swaps use `transferTile`), so G2.4 was never gated on it.
+- Engine patch `quadtilenode4-resolvetexture-program-bind.patch` (G2.4a,
+  groundwork for real imagery): `GLQuadTileNode4.resolveTexture` composited
+  with `uColor` on whatever program was current — it now binds its own
+  program first. Shipped as an engine shadow derived from the patch (the
+  source tree stays at the pin), drift-gated in CI with the staged dylibs
+  re-signed; the local drift check SKIPs loudly with its reason, the patch
+  loop dies on failure, and codesign errors surface (PR #53).
+- `render/WindowHost.m` compiles with ARC: under MRC the autoreleased
+  `[CAMetalLayer layer]` was deallocated by `open()`'s `@autoreleasepool`,
+  so the `jlong` the Java side received, every `g_layer` check and ANGLE's
+  retain inside `eglCreateWindowSurface` all touched freed memory (the
+  smoke passed on allocator luck). The Metal device is created once and
+  handed to the layer instead of being fetched a second time (PR #55).
+- The render harness stops passing without its evidence: a failed PPM
+  renderback (`fopen` or short write) warns and gates
+  (`MACTAK_SMOKE_PPM`); the ANGLE linkage check captures `otool -L`
+  before grepping — under pipefail `grep -q` could exit 141 (EPIPE) and
+  read as "stub linkage"; `fetch-angle.sh` runs `install_name_tool` bare
+  and asserts `otool -D` reports `@rpath/<name>.dylib` (a skipped id
+  rewrite left Electron's `./x` install names for dyld to trip over far
+  from the staging); the smoke's `--out` parent is created before Java
+  runs; `render/build-window-host.sh` honors `JAVA_HOME` (CI's
+  setup-java) before `/usr/libexec/java_home` (PR #55).
+- `headless/run.sh` polls A's log for `iface-up` (bounded at 90 s,
+  failing with A's log) instead of a fixed `sleep 1` that raced the
+  launcher's compile; `layer.sh` no longer silently asserts user files
+  at exactly one feature (`FILE:N` overrides, a bare `FILE` says what it
+  assumed, a non-numeric `N` falls back loudly); `make lint` covers
+  `dev/g1/headless/atak-headless`, which the `dev/**/*.sh` glob never
+  matched (PR #55).
+- `fetch-angle.sh` keeps codesign stderr (swallowed failures exited
+  undiagnosably) and both smoke runners guard the ANGLE dir before
+  `cd`ing, where `set -e` ate the missing-ANGLE message; the render
+  smoke's bcprov fetch retries — single-shot Maven Central curls flake
+  CI; the classpath existence check splits on `:` only (a whitespace
+  split false-failed spaced paths); window-host staleness is keyed on
+  the build script and the JDK's `jni.h` too (PR #56).
+- The G1 round-trip fails loudly when an `ogr2ogr` conversion dies (a
+  silently dropped leg still printed PASS), and its evidence lands in
+  one `mktemp -d` dir — `mktemp -t` leaked two orphans per run (PR #56).
+
+### CI
+
+- `cot-roundtrip.yml` gains `workflow_dispatch`, runs on edits to the
+  workflow itself, and uploads failed-run evidence — the runner's
+  TMPDIR dies with the job (PR #56).
+- `supply-chain.yml` splits: the Brewfile job (`brew bundle`
+  install/check, lock regeneration, and the new Brewfile == union of
+  the workflows' `brew install` lines gate, which also triggers on
+  `ci.yml` and `cot-roundtrip.yml` edits) stays on macOS, while
+  osv-scanner runs on ubuntu — its container action is Linux-only and
+  had never produced a results file on `macos-26` (PR #55).
 
 ## [0.3.0] - 2026-11-05 — G2: map renders (ANGLE on Metal)
 

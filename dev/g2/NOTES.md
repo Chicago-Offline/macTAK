@@ -1,5 +1,19 @@
 # dev/g2 — G2: map renders in a native macOS window (ANGLE on Metal)
 
+## State (M3.1 — 2026-11-06): window natives + dynamic-size context, exercised through a real window surface, gated in CI
+
+`RenderSmoke --window W×H` swaps the init pbuffer for a window surface:
+`render/WindowHost.m` owns a bare off-screen `CAMetalLayer` (no AppKit
+at all — the `java` launcher's main runs on a spawned `pthread`, and
+AppKit wants the main thread), `render/WindowHost.java` drives it over
+JNI, and `--resize` pushes a mid-run `drawableSize` change through the
+host the way a real window resize does. ANGLE-Metal sizes a window
+surface once at creation (and refuses a second surface on a live layer,
+`EGL_BAD_ALLOC`), so `adoptSurfaceSize` destroy-then-recreates on the
+same layer. Two runs gate (`make test-render-window`: bare, and the
+GeoJSON + MBTiles stack) — the exercise needs no GUI session, so CI
+runs it itself, upgrading M3.0's manual-only gate. Section "M3.1" below.
+
 ## State (M3.0 — 2026-11-06): the window surface is proven — `eglCreateWindowSurface` accepts a live `CAMetalLayer`
 
 `make smoke-window` runs the new window smoke

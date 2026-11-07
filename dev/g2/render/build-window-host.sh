@@ -19,7 +19,7 @@ JDK="$(/usr/libexec/java_home -v 1.8 2>/dev/null || true)"
 
 if [[ ! -f "$OUT" ]] || [[ "$HERE/WindowHost.m" -nt "$OUT" ]]; then
   mkdir -p "$(dirname "$OUT")"
-  clang -ObjC -dynamiclib \
+  clang -ObjC -fobjc-arc -dynamiclib \
     -I"$JDK/include" -I"$JDK/include/darwin" \
     -framework Foundation -framework AppKit -framework QuartzCore -framework Metal \
     -o "$OUT" "$HERE/WindowHost.m"

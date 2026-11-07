@@ -1,4 +1,4 @@
-.PHONY: help hooks build build-angle angle gen-gles-shim check-gen-gles-shim test test-roundtrip test-render test-render-resize build-window-host test-render-window smoke-window lint clean
+.PHONY: help hooks build build-angle angle gen-gles-shim check-gen-gles-shim check-engine-shadows test test-roundtrip test-render test-render-resize build-window-host test-render-window smoke-window lint clean
 
 # The android.opengl.GLES20/30 runtime is GENERATED (dev/g2/gen-gles-shim.py):
 # two Java classes, the JNI bodies and the stub-mode libGLESv2. Edit the
@@ -9,6 +9,15 @@ GLES_SHIM_GL3H  := src/khronos/OpenGL/api/GLES3/gl3.h
 GLES_SHIM_OUT   := dev/g2/render/src/android/opengl/GLES20.java dev/g2/render/src/android/opengl/GLES30.java \
                    dev/g2/jni-extra/mactak_gles.c dev/g2/jni-extra/mactak_gles_stub.c
 
+# Engine Java classes the render host shadows ahead of the transplant jar
+# because a dev/g1/patches/*.patch hunk touches them: each shadow must be
+# byte-identical to upstream src/ with the named patch applied (the patch is
+# the single source of the change; the shadow is how CI's jar-only JVM sees
+# it). Pairs of <engine-java-relative-path>=<patch file>.
+ENGINE_SHADOW_SRC := src/takkernel/engine/src/main/java
+ENGINE_SHADOW_DST := dev/g2/render/engine-shadows
+ENGINE_SHADOWS    := com/atakmap/map/layer/raster/tilereader/opengl/GLQuadTileNode4.java=dev/g1/patches/quadtilenode4-resolvetexture-program-bind.patch
+
 help:
 	@echo "Targets:"
 	@echo "  hooks          - install git hooks (git config core.hooksPath .githooks)"
@@ -17,6 +26,7 @@ help:
 	@echo "  build-angle    - build native with ANGLE in the GLES slot (MACTAK_GLES=angle) + commo"
 	@echo "  gen-gles-shim  - regenerate the android.opengl GLES shim (Java + JNI + stub) from the transplant jar x gl3.h"
 	@echo "  check-gen-gles-shim - regenerate and fail if the committed shim files differ (CI drift gate)"
+	@echo "  check-engine-shadows - fail if a shadowed engine Java class differs from upstream src/ + its dev/g1/patches hunk (CI drift gate)"
 	@echo "  test           - run smoke tests (dev/g1/smoke/run.sh)"
 	@echo "  test-roundtrip - run headless round-trip tests (dev/g1/headless/run.sh)"
 	@echo "  test-render    - G2 render smoke: engine GLGlobe into an EGL pbuffer on ANGLE, bare + GeoJSON layer + MBTiles basemap (dev/g2/render/run.sh)"
@@ -54,6 +64,20 @@ check-gen-gles-shim:
 	rm -rf "$$tmp"; \
 	[ $$ok = 1 ] && echo "[check-gen-gles-shim] OK: committed shim matches the generator" \
 		|| { echo "[check-gen-gles-shim] run 'make gen-gles-shim' and commit the result"; exit 1; }
+
+check-engine-shadows:
+	@[ -d $(ENGINE_SHADOW_SRC) ] || { echo "[check-engine-shadows] SKIP: $(ENGINE_SHADOW_SRC) not present (upstream src/ not checked out)"; exit 0; }; \
+	tmp=$$(mktemp -d) && ok=1; \
+	for pair in $(ENGINE_SHADOWS); do \
+		rel=$${pair%%=*}; p=$${pair#*=}; \
+		mkdir -p "$$tmp/java/$$(dirname $$rel)" && cp "$(ENGINE_SHADOW_SRC)/$$rel" "$$tmp/java/$$rel" && \
+		patch --forward --silent -p3 -d "$$tmp" < "$$p" || { echo "[check-engine-shadows] $$p does not apply to upstream $$rel"; ok=0; continue; }; \
+		cmp -s "$$tmp/java/$$rel" "$(ENGINE_SHADOW_DST)/$$rel" \
+			|| { echo "[check-engine-shadows] DRIFT: $(ENGINE_SHADOW_DST)/$$rel != upstream + $$p"; ok=0; }; \
+	done; \
+	rm -rf "$$tmp"; \
+	[ $$ok = 1 ] && echo "[check-engine-shadows] OK: shadows match upstream + patches" \
+		|| { echo "[check-engine-shadows] regenerate: cp upstream file into place and apply the patch (-p3)"; exit 1; }
 
 test:
 	bash dev/g1/smoke/run.sh

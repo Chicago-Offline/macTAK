@@ -68,11 +68,23 @@ for j in ${CP//:/ }; do
   [[ -f "$j" ]] || { echo "render/run.sh: missing jar: $j" >&2; exit 2; }
 done
 
-if [[ ! -d "$OUT" ]] || [[ -n "$(find "$HERE/src" "$G1/headless/src" -name '*.java' -newer "$OUT" -print -quit)" ]]; then
+SHADOWS="$HERE/engine-shadows"
+if [[ ! -d "$OUT" ]] || [[ -n "$(find "$HERE/src" "$SHADOWS" "$G1/headless/src" -name '*.java' -newer "$OUT" -print -quit)" ]]; then
   rm -rf "$OUT"; mkdir -p "$OUT"
+  # engine-shadows/: upstream engine classes carrying a dev/g1/patches hunk
+  # (byte-identical to src/ + patch, gated by `make check-engine-shadows`);
+  # upstream code is not held to our -Xlint:all -Werror bar.
+  # Without upstream src/ that gate SKIPs, so a patch edited without
+  # regenerating its shadow is caught only in CI — say so at compile time.
+  if [[ ! -d "$ROOT/src/takkernel/engine/src/main/java" ]]; then
+    echo "render/run.sh: engine-shadows/ NOT drift-checked (no upstream src/ checkout) — if you edited dev/g1/patches, regenerate the shadow; 'make check-engine-shadows' verifies where src/ exists" >&2
+  fi
+  find "$SHADOWS" -name '*.java' -print0 | xargs -0 "$JDK/bin/javac" -source 8 -target 8 -nowarn -encoding UTF-8 \
+    -classpath "$CP" -d "$OUT" \
+    || { rm -rf "$OUT"; exit 1; }
   # + dev/g1/headless/src: LayerStore/NativeGdal (G1.3) back the --layer option
   find "$HERE/src" "$G1/headless/src" -name '*.java' -print0 | xargs -0 "$JDK/bin/javac" -source 8 -target 8 -Xlint:all -Werror -encoding UTF-8 \
-    -classpath "$CP" -d "$OUT" \
+    -classpath "$OUT:$CP" -d "$OUT" \
     || { rm -rf "$OUT"; exit 1; }
   touch "$OUT"
 fi

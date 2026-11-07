@@ -55,10 +55,17 @@ UID_B="${TAK_UID_PREFIX:-g1-rt-$HOST_TAG}-b"
 # client sees nothing — so the pair must never collide with an older EUD row.
 CS_A="$(echo "$UID_A" | tr '[:lower:]' '[:upper:]')"
 CS_B="$(echo "$UID_B" | tr '[:lower:]' '[:upper:]')"
-LOG_A="$(mktemp -t g1-roundtrip-a.XXXXXX).log"
-LOG_B="$(mktemp -t g1-roundtrip-b.XXXXXX).log"
-DB_A="${LOG_A%.log}.sqlite"
-DB_B="${LOG_B%.log}.sqlite"
+# One temp dir, not two `mktemp -t` files: those each created a file and the
+# script then appended ".log" to the returned NAME — the created zero-byte
+# files were never used and never removed (two fresh orphans in $TMPDIR per
+# run). The trap cleans the dir on the way out; the FAIL paths disarm it
+# first and keep the evidence on disk.
+RTRUN="$(mktemp -d "${TMPDIR:-/tmp}/g1-roundtrip.XXXXXX")"
+trap 'rm -rf "$RTRUN"' EXIT
+LOG_A="$RTRUN/roundtrip-a.log"
+LOG_B="$RTRUN/roundtrip-b.log"
+DB_A="$RTRUN/roundtrip-a.sqlite"
+DB_B="$RTRUN/roundtrip-b.sqlite"
 
 nc -z -G 2 "$TAK_HOST" "$TAK_PORT" >/dev/null 2>&1 \
   || { echo "run.sh: no TAK server on $TAK_HOST:$TAK_PORT — start one first (set TAK_HOST/TAK_PORT)" >&2; exit 1; }
@@ -96,6 +103,7 @@ until grep -q 'headless: iface-up' "$LOG_A" 2>/dev/null; do
     echo "run.sh: A never reached iface-up within 90s — A's log:" >&2
     tail -n 40 "$LOG_A" >&2 || true
     kill "$pid_a" 2>/dev/null || true
+    trap - EXIT   # keep the evidence for inspection
     exit 1
   fi
   sleep 0.2
@@ -144,8 +152,9 @@ fi
 
 if [[ "$fail" -eq 0 ]]; then
   echo "[g1-roundtrip] PASS — both ifaces up, B's presence+marker relayed to A, A's presence relayed to B, both persisted in the tracks DBs"
-  rm -f "$LOG_A" "$LOG_B" "$DB_A" "$DB_B"
+  # logs + DBs go with the temp dir via the EXIT trap
 else
+  trap - EXIT   # keep the evidence for inspection
   echo "[g1-roundtrip] client logs kept: $LOG_A $LOG_B (DBs: $DB_A $DB_B)" >&2
   exit 1
 fi

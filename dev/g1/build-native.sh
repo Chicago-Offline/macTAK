@@ -87,7 +87,7 @@ rsync -a --exclude .git "$ENGINE_MAIN/" "$WORK/engine/"
 
 log "applying GDAL-drift patches (-p3 → cpp/...)"
 for p in "$DEV"/spike/g0/patches/gdal-drift-*.patch "$G1"/patches/*.patch; do
-  patch --forward --silent -p3 -d "$WORK/engine" < "$p"
+  patch --forward --silent -p3 -d "$WORK/engine" < "$p" || die "patch failed: $(basename "$p")"
   log "  applied $(basename "$p")"
 done
 
@@ -329,7 +329,7 @@ fi
 # provenance enforcement while `codesign -v --strict` still passed; a fresh
 # adhoc signature over the staged file fixes it.
 for f in "$OUT"/*.dylib; do
-  codesign --force --sign - "$f" >/dev/null 2>&1 || die "codesign failed on staged $f"
+  cs_out="$(codesign --force --sign - "$f" 2>&1)" || die "codesign failed on staged $f: $cs_out"
 done
 
 # --- canary --------------------------------------------------------------

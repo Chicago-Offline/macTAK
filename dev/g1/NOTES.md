@@ -446,3 +446,52 @@ exit 2.
   collision. Worth filing.
 - The `[commo-diag]` WARNING probes (patch 0001) are loud on every run; demote
   or gate behind `MACTAK_COMMO_DIAG` once the stack has been quiet for a while.
+
+## G1.6 — wave 4: JNI exception hygiene + attrib-location guards (engine C++)
+
+Four patches in `dev/g1/patches/`, cut from the wave-3 audit (F1–F4) after a
+line-by-line smell test against the engine sources. Evidence: `make build`,
+`make test-render`, `make test-render-window` all PASS with the full set
+applied (`build-native.sh` applies `dev/g1/patches/*.patch` to the fresh
+engine copy, -p3).
+
+- `jnilayer2-exception-clears.patch` (F1) — `ManagedGLLayer2` clears (report
+  once + `ExceptionClear`) a Java exception thrown by `getSubject()`,
+  `draw()`, `release()`, `start()` or `stop()`; the ctor also skips its
+  marshal/adapt pair while one is pending, leaving `csubject` null. Mirrors
+  the draw-only fix the G2 wave already made to `ManagedGLMapRenderable2`.
+  Hazard documented, not patched: `getSubject()` returns `Layer2&`
+  (`GLLayer2.h`), so a null subject stays unguarded by design — callers of
+  `ManagedGLLayer2::getSubject()` must test the `shared_ptr` before use.
+- `jnilayerspi2-exception-clears.patch` (F2) — `ManagedGLLayerSpi2::create`
+  maps a thrown Java `create()` to `TE_Err` (describe + clear) instead of
+  `TE_InvalidArg` with the exception pending. Caller contract proven:
+  `GLLayerFactory2.cpp:110` advances to the next SPI on any non-OK, so the
+  pending exception used to poison the next SPI's JNI calls. A clean null
+  return still keeps `TE_InvalidArg`.
+- `attrib-location-guards.patch` (F3) — the two live per-frame bugs are in
+  the terrain draws: the planar `TerrainTile*` shader variants declare no
+  `aEcefVertCoords` (location -1) and both renderers select planar for
+  non-ellipsoid geometry (`GLGlobe.cpp:2902`, `GLMapView2.cpp:3098`), so
+  `drawTerrainMeshesImpl`'s unguarded enable/disable of the ECEF attribute
+  raised `GL_INVALID_VALUE` on every 2D terrain frame. The
+  `GLBatchGeometryRenderer3` AA-lines/point guards in the same patch are
+  defensive only: a single cached program uses all 8 queried attributes, so
+  -1 fires solely on a compile/link failure. CHANGELOG wording keeps the
+  split honest (per-frame bug vs hardening).
+- `terraintile-ecef-ge.patch` (F4) — one token: `GLTerrainTile.cpp:508`
+  tested `aEcefVertCoords > 0` for the ECEF local frame, rejecting a
+  legitimate location 0 while the same file's enable/pointer code (and the
+  wave-2 `terraintile-guard` patch at :580) accepts `>= 0`.
+
+Report-only observations (seen in the audit, deliberately not patched):
+
+- `GLBatchGeometryShaders.cpp:179` stores into the wrong function-local —
+  a dead store today (readers use the correct local), harmless but a
+  foot-gun.
+- `GLMapView2.cpp:3250` picks the terrain frame by SRID where `GLGlobe`
+  picks by capability — divergent selection logic for the same shader
+  family; fragile if a third path grows.
+- The reference-returning `getSubject()` pattern (null → deref hazard) is
+  endemic across the JNI bridge; wave 4 covers the `ManagedGLLayer2`
+  surface only.

@@ -7,7 +7,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
-- Nothing yet.
+### Fixed
+
+- JNI layer bridge: a Java exception thrown inside a `GLLayer3` callback no
+  longer poisons the render thread. `ManagedGLLayer2` now reports (once) and
+  clears exceptions thrown by `getSubject()`, `draw()`, `release()`,
+  `start()` and `stop()`, mirroring the draw-only fix
+  `ManagedGLMapRenderable2` already got; the constructor also skips its
+  marshal/adapt pair while an exception is pending, leaving the native
+  subject null instead of populating it against a poisoned thread.
+  (`dev/g1/patches/jnilayer2-exception-clears.patch`)
+- JNI SPI dispatch: `ManagedGLLayerSpi2::create` no longer reports a Java
+  exception thrown by the SPI as `TE_InvalidArg` with the exception still
+  pending — the factory (`GLLayerFactory2`) reads any non-OK result as
+  "not my subject" and advances to the next SPI, whose JNI calls then ran
+  against the exception in flight. A thrown `create` is now described,
+  cleared and reported as `TE_Err`; a clean null return keeps
+  `TE_InvalidArg`. (`dev/g1/patches/jnilayerspi2-exception-clears.patch`)
+- Terrain (per-frame bug): `GLGlobe` and `GLMapView2` guard
+  `glEnable/glDisableVertexAttribArray(aEcefVertCoords)` — the planar
+  terrain shader variants (`TerrainTilePlanar*`) declare no ECEF attribute,
+  the location is -1 there, and both renderers select the planar variant
+  for non-ellipsoid geometry, so every 2D/planar terrain frame raised
+  `GL_INVALID_VALUE`. (`dev/g1/patches/attrib-location-guards.patch`)
+- Terrain tile shader: `GLTerrainTile`'s local-frame selection tested
+  `aEcefVertCoords > 0`, rejecting a legitimate attribute location 0 while
+  the enable/pointer code in the same file (and the wave-2 guard patch)
+  already accepts `>= 0`; ECEF terrain used the wrong local frame whenever
+  the attribute landed on location 0.
+  (`dev/g1/patches/terraintile-ecef-ge.patch`)
+- Batch geometry (defensive hardening): `GLBatchGeometryRenderer3` guards
+  every attribute-location query in the anti-aliased-lines and point
+  draws. All eight queried attributes are used by the single cached
+  program today, so -1 can only fire on a compile/link failure — the
+  guards keep such a failure from poisoning the frame's GL error state.
+  (same `attrib-location-guards.patch`)
 
 ## [0.3.1] - 2026-11-07 — G2: window surfaces (M3.0–M3.1) + hardening
 

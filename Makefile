@@ -122,6 +122,10 @@ smoke-window: angle
 	@mkdir -p dev/g2/build
 	MACTAK_SMOKE_PPM=dev/g2/build/window-smoke.ppm bash dev/g2/smoke/run-window.sh
 
+# bash -n + shellcheck over the dev shell tree; markdownlint over the repo's
+# own docs ('!src/': the read-only upstream pin isn't held to our rules, and
+# CI's docs job lints only PR-changed *.md, so it never sees src either);
+# actionlint over the workflows. Optional tools absent on PATH are skipped.
 lint:
 	@git ls-files -z 'dev/**/*.sh' 'dev/g1/headless/atak-headless' | xargs -0 -n1 bash -n
 	@if command -v shellcheck >/dev/null 2>&1; then \
@@ -130,7 +134,7 @@ lint:
 		echo "[lint] skip: shellcheck not installed"; \
 	fi
 	@if command -v markdownlint-cli2 >/dev/null 2>&1; then \
-		markdownlint-cli2 '**/*.md'; \
+		markdownlint-cli2 '**/*.md' '!src/**/*.md'; \
 	else \
 		echo "[lint] skip: markdownlint-cli2 not installed"; \
 	fi

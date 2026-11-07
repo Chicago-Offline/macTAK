@@ -98,7 +98,9 @@ for lib in libEGL libGLESv2; do
   got_id="$(otool -D "$out" | awk 'NR == 2 { print $1 }')"
   [[ "$got_id" == "@rpath/$lib.dylib" ]] \
     || { echo "FATAL: install-name rewrite failed for $out (otool -D: ${got_id:-none})" >&2; exit 1; }
-  codesign --force --sign - "$out" >/dev/null 2>&1
+  # Keep stderr (stdout is quiet): under set -e a swallowed codesign failure
+  # would exit with zero diagnostics — same rationale as install_name_tool above.
+  codesign --force --sign - "$out" >/dev/null
   log "staged $out ($(stat -f %z "$out") bytes)"
 done
 

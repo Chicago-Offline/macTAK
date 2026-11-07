@@ -25,7 +25,11 @@ else
   [[ -n "$JDK" ]] || { echo "build-window-host.sh: JDK 1.8 not found (set JAVA_HOME)" >&2; exit 2; }
 fi
 
-if [[ ! -f "$OUT" ]] || [[ "$HERE/WindowHost.m" -nt "$OUT" ]]; then
+# WindowHost.m's mtime alone misses two stale-dylib cases: edits to this
+# script (flags), and a switched JDK (its jni.h differs). Compare both too —
+# both comparisons are < 2s apart from a real rebuild.
+if [[ ! -f "$OUT" ]] || [[ "$HERE/WindowHost.m" -nt "$OUT" ]] \
+   || [[ "$0" -nt "$OUT" ]] || [[ "$JDK/include/jni.h" -nt "$OUT" ]]; then
   mkdir -p "$(dirname "$OUT")"
   clang -ObjC -fobjc-arc -dynamiclib \
     -I"$JDK/include" -I"$JDK/include/darwin" \

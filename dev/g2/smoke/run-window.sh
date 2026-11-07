@@ -30,6 +30,10 @@ for arg in "$@"; do
     *) ANGLE="$arg" ;;
   esac
 done
+# Check the dir BEFORE cd'ing into it: under set -e a failed cd aborts with
+# a bare "cd: no such file" and the helpful message below never shows.
+[[ -d "$ANGLE" ]] \
+  || { echo "FATAL: ANGLE distribution not found at $ANGLE — run dev/g2/fetch-angle.sh first" >&2; exit 1; }
 ANGLE="$(cd "$ANGLE" && pwd)"
 KHR="$ROOT/src/khronos"
 

@@ -226,10 +226,11 @@ is ordered roughly by when it bites.
     real imagery never reaches it and G2.4 is not gated on it. Clang
     `-Wcomma` flags the pristine TU and is clean after the patch; the
     stub-GLES canary cannot exercise it (`bindTile` needs a complete FBO).
-  - `GLQuadTileNode4.resolveTexture` composites child textures with
-    `uColor` set on whatever program happens to be current (G2.3
-    known-benign noise) — bind `core.shader.handle` before compositing.
-    Android drivers hide it today; ANGLE surfaces it.
+  - ~~`GLQuadTileNode4.resolveTexture` composites child textures with
+    `uColor` set on whatever program happens to be current~~ — **fixed
+    2026-11-07** (`../g1/patches/quadtilenode4-resolvetexture-program-bind.patch`,
+    delivered as an engine shadow; see "G2.4a" below). Android drivers
+    hid it; ANGLE reported it as `GL_INVALID_OPERATION` once per composite.
   - `GLBatchGeometryRenderer3/4` feed `in int` attributes through
     `glVertexAttribPointer` (trap 12's pattern, already redirected in the
     shim) — patch when the native line renderer is on the path.
@@ -430,16 +431,15 @@ Francisco. No network, no third-party imagery licence.
   `null`) when a requested tile is simply absent from the sparse pyramid
   (edges of the fixture). Not a decode or I/O failure; a real one logs
   `[MBTilesTileReader]: error` with a trace first.
-- KHR_debug `glUniform4f: Uniform size does not match uniform method`,
-  once per composited tile, from `GLQuadTileNode4.resolveTexture`
-  (child-texture FBO compositing). That path runs from a queued render-thread
-  event, never calls `glUseProgram`, and sets `core.shader.uColor` on
-  **whatever program happens to be current** — a latent upstream bug that
-  Android drivers don't report. The composite is discarded as soon as the
-  tile's own read lands, so the picture is unaffected; it also happens
-  outside `view.render()`, which is why the frame-loop `glGetError` count
-  stays 0. Fix (bind `core.shader.handle` before compositing) belongs in an
-  engine patch once the tile-sharing paths are exercised with real imagery.
+- ~~KHR_debug `glUniform4f: Uniform size does not match uniform method`,
+  once per composited tile, from `GLQuadTileNode4.resolveTexture`~~ —
+  **fixed 2026-11-07 (G2.4a, below)**. For the record: that path runs from
+  a queued render-thread event, never called `glUseProgram`, and set
+  `core.shader.uColor` on **whatever program happened to be current** — a
+  latent upstream bug Android drivers don't report. The composite is
+  discarded as soon as the tile's own read lands, so the picture was
+  unaffected; it also happened outside `view.render()`, which is why the
+  frame-loop `glGetError` count stayed 0.
 
 ## M3 design — window surface and host model (decided 2026-11-05)
 
@@ -687,7 +687,44 @@ to /tmp, without the `com.apple.provenance` xattr, gave a clean dlopen
 error instead of the kill — the tell. Fresh `codesign -f -s -` over
 the staged pair fixed it at once; rebuilds since are stable. Suspected:
 macOS 27.2 provenance enforcement against re-staged linker-signed
-output. Candidate follow-up: a one-line re-sign in `build-native.sh`'s
-staging step (deliberately left out of #49). Diagnosis shortcut: a
+output. ~~Candidate follow-up: a one-line re-sign in `build-native.sh`'s
+staging step (deliberately left out of #49).~~ Landed 2026-11-07 (G2.4a):
+`build-native.sh` re-signs every staged `native-dist/*.dylib` adhoc, as
+`fetch-angle.sh` already did for the ANGLE pair. Diagnosis shortcut: a
 Killed: 9 with a passing `codesign -v` means re-sign the staged pair
 before re-bisecting anything.
+
+## G2.4a — `resolveTexture` program bind + engine-shadow mechanism (2026-11-07)
+
+First G2.4 patch that changes a frame: `GLQuadTileNode4.resolveTexture`
+(child-texture FBO compositing, run from a queued render-thread event when
+a tile read errors) now binds `core.shader.handle` and enables its two
+attribute arrays before compositing, and restores the caller's program and
+array-enable state after. A/B on the basemap smoke with `MACTAK_GL_DEBUG=1`:
+baseline 4 × `glUniform4f: Uniform size does not match uniform method`
+(`GL_INVALID_OPERATION`, one per composited edge tile), patched 0; the
+known-benign list above loses its only GL entry. `test-render` 3/3,
+`test-render-window` 2/2, `test-render-resize` 2/2.
+
+### How a Java engine patch ships here
+
+The engine's Java comes from the transplant jar, so a `.patch` alone
+changes nothing at runtime. The mechanism:
+
+- `dev/g1/patches/<name>.patch` is the **single source of the change**
+  (same place as the C++ patches; applies with `-p3` to upstream
+  `src/takkernel/engine/src/main/java`).
+- `dev/g2/render/engine-shadows/<pkg path>/X.java` is the patched upstream
+  file, byte-identical to `src/` + patch, compiled ahead of the jar.
+- `make check-engine-shadows` (CI, `render-angle` job, which has upstream
+  `src/` checked out) re-derives each shadow from `src/` + patch in a temp
+  dir and `cmp`s — the shadow cannot drift from the patch. Pairs live in
+  the Makefile's `ENGINE_SHADOWS`.
+- `render/run.sh` compiles `engine-shadows/` in a first pass with `-nowarn`
+  (upstream code is not held to our `-Xlint:all -Werror` bar — the pristine
+  file trips 45 deprecation/cast warnings), then our sources strict with
+  the shadow classes ahead on the classpath.
+
+`engine-shadows/` is distinct from `src/`'s shadows (`EngineLibrary`,
+`AtakMapView`, `android.*`): those are **replacements** we own; these are
+**upstream + patch** we do not edit by hand.

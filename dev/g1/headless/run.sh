@@ -66,6 +66,14 @@ LOG_A="$RTRUN/roundtrip-a.log"
 LOG_B="$RTRUN/roundtrip-b.log"
 DB_A="$RTRUN/roundtrip-a.sqlite"
 DB_B="$RTRUN/roundtrip-b.sqlite"
+# Mirror the evidence into the checkout: CI's cot-roundtrip workflow uploads
+# this dir as an artifact on failure (the runner's TMPDIR dies with the job).
+keep_failed() {
+  local dest="$HERE/build/failed-runs"
+  mkdir -p "$dest"
+  cp -f "$LOG_A" "$LOG_B" "$DB_A" "$DB_B" "$dest/" 2>/dev/null || true
+  echo "[g1-roundtrip] evidence mirrored into $dest" >&2
+}
 
 nc -z -G 2 "$TAK_HOST" "$TAK_PORT" >/dev/null 2>&1 \
   || { echo "run.sh: no TAK server on $TAK_HOST:$TAK_PORT — start one first (set TAK_HOST/TAK_PORT)" >&2; exit 1; }
@@ -104,6 +112,7 @@ until grep -q 'headless: iface-up' "$LOG_A" 2>/dev/null; do
     tail -n 40 "$LOG_A" >&2 || true
     kill "$pid_a" 2>/dev/null || true
     trap - EXIT   # keep the evidence for inspection
+    keep_failed
     exit 1
   fi
   sleep 0.2
@@ -155,6 +164,7 @@ if [[ "$fail" -eq 0 ]]; then
   # logs + DBs go with the temp dir via the EXIT trap
 else
   trap - EXIT   # keep the evidence for inspection
+  keep_failed
   echo "[g1-roundtrip] client logs kept: $LOG_A $LOG_B (DBs: $DB_A $DB_B)" >&2
   exit 1
 fi

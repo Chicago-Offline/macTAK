@@ -79,3 +79,15 @@ jobs:
           FTS_HOST: 127.0.0.1
           FTS_PORT: '8087'
         run: bash dev/g1/headless/run.sh 15
+
+      - name: Upload failed-run evidence
+        # run.sh keeps both clients' logs + tracks DBs on FAIL — but in the
+        # runner's TMPDIR, which dies with the job. On its failure paths it
+        # now mirrors them into dev/g1/headless/build/failed-runs/; ship
+        # that as an artifact so a red round-trip carries its evidence.
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cot-roundtrip-failed-runs
+          path: dev/g1/headless/build/failed-runs/
+          if-no-files-found: ignore

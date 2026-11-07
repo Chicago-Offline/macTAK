@@ -94,6 +94,8 @@ make build-angle                            # stage ANGLE, rebuild with it in th
 make test                                   # load smoke: engine + JNI in one JVM
 make test-roundtrip                         # CoT round-trip (FTS / OpenTAKServer / fake-cot-server)
 make test-render                            # G2 render smoke: bare + GeoJSON layer + MBTiles basemap
+make smoke-window                           # G2 M3.0 window-surface smoke (manual: opens a window ~3 s)
+make test-render-window                     # G2 M3.1 window-surface exercise (off-screen; CI runs it too)
 ```
 
 G0 spike recipe (historical — the current build path is `make build`):

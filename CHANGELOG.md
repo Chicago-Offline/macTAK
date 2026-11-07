@@ -9,6 +9,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `RenderSmoke --window W×H` + `make test-render-window` /
+  `make test-render-resize` (M3.1): the engine renders into a real
+  ANGLE window surface — a host dylib (`render/WindowHost.m`) owns a
+  bare off-screen `CAMetalLayer` (no AppKit: AppKit wants the main
+  thread and the `java` launcher's main is a spawned pthread, which a
+  bare layer dodges), `render/WindowHost.java` drives it over JNI, and
+  `--resize` changes the layer's `drawableSize` mid-run the way a real
+  host does on a window resize. PASS requires a window surface on the
+  layer, the mid-run resize gone through the host (`eglQuerySurface`
+  truth at the new size), the `OnSizeChangedListener` fired, every
+  `swap()` a successful present (counted; zero failures), and content
+  pixels at the new size. ANGLE-Metal sizes a window surface once at
+  creation and refuses a second surface on a live layer
+  (`EGL_BAD_ALLOC`), so `adoptSurfaceSize` destroy-then-recreates on
+  the same layer — the sizing contract is documented at the site
+  (`mactak_egl.cpp`). The exercise needs no GUI session, so CI runs it
+  itself, upgrading M3.0's compile-only/manual split (#49).
+
 - `make smoke-window` (M3.0): the G2 window-surface gate — an NSWindow
   with a live `CAMetalLayer` becomes an ANGLE EGL window surface
   (`eglCreateWindowSurface`, Metal platform), draws a GL ES 3.0

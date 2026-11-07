@@ -70,6 +70,25 @@ How the plan above actually materialized once G1 closed:
   even after multiple attempts"); rerunning just the failed jobs passed in
   normal job times (1–10 min). Remedy: `gh run rerun <run-id> --failed`.
 
+### As-landed, G2 (through 2026-11-06)
+
+- **`render-angle`** (`ci.yml`, `macos-26`) joined Tier 1 with G2.1:
+  GLES shim drift gate (`make check-gen-gles-shim`), pinned-Electron
+  ANGLE staging + the EGL/ES3 triangle smoke, the engine+glue build
+  with ANGLE in the GLES slot, then the render smokes — bare pbuffer,
+  GeoJSON fixture, MBTiles basemap — with the PNGs uploaded as
+  artifacts (`render-angle-macos-arm64`).
+- **Window gates:** M3.0's `smoke-window` compiles in CI but its live
+  run stays manual (it opens a window; CI has no GUI session). M3.1's
+  window exercise needs no GUI session, so CI runs it itself —
+  `make test-render-window` plus the dynamic-size exercise (`--resize`
+  mid-run), counted presents, zero failures allowed (#49).
+- **`jvm-tests`** gained the G1.5 additions: the data-package importer
+  canary (`dev/g1/headless/test/datapackage.sh` — openssl fixture on
+  bare macOS LibreSSL + javac/java assertions) and a compile-only gate
+  for `HeadlessCLI.java` (#29 — CI previously never type-checked the
+  launcher).
+
 ## 5. Self-hosted pattern — VMPal golden VMs
 
 The dev Mac also hosts the CI jobs that licensing forces there. VMPal's CI model maps onto GitHub Actions directly:

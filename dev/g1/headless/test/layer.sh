@@ -6,7 +6,8 @@
 #
 #   dev/g1/headless/test/layer.sh            # committed GeoJSON fixture (+ SHP/GPKG/KML
 #                                            # derived from it when ogr2ogr is on PATH)
-#   dev/g1/headless/test/layer.sh FILE...    # your own layer file(s)
+#   dev/g1/headless/test/layer.sh FILE...    # your own layer file(s), each asserted
+#                                            # at exactly 1 feature (FILE:N for N)
 #
 # PASS = every layer opens and yields the expected feature count.
 set -euo pipefail
@@ -34,7 +35,24 @@ run_one() {   # run_one FILE EXPECTED_FEATURES
 }
 
 if [[ $# -ge 1 ]]; then
-  for f in "$@"; do run_one "$f" 1; done
+  # FILE          asserts exactly 1 feature (sanity-check a single-feature file)
+  # FILE:N        asserts exactly N features (a 5-feature file with a bare
+  #               FILE would FAIL — say so instead of a silent surprise)
+  for f in "$@"; do
+    if [[ "$f" == *:* ]]; then
+      file="${f%:*}"              # % always strips at the LAST colon
+      n="${f#"$file":}"           # literal prefix strip — ## can't match a ':'-leading pattern on absolute paths
+      if [[ "$n" =~ ^[1-9][0-9]*$ ]]; then
+        run_one "$file" "$n"
+      else
+        echo "[layer-test] (note) $f: FILE:N needs a numeric N — treating as a bare file"
+        run_one "$f" 1
+      fi
+    else
+      echo "[layer-test] (note) $f: asserting exactly 1 feature — pass FILE:N for the real count"
+      run_one "$f" 1
+    fi
+  done
 else
   run_one "$FIXTURE" "$FIXTURE_FEATURES"
   if command -v ogr2ogr >/dev/null 2>&1; then

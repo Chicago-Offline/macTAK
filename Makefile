@@ -123,9 +123,9 @@ smoke-window: angle
 	MACTAK_SMOKE_PPM=dev/g2/build/window-smoke.ppm bash dev/g2/smoke/run-window.sh
 
 lint:
-	@git ls-files -z 'dev/**/*.sh' | xargs -0 -n1 bash -n
+	@git ls-files -z 'dev/**/*.sh' 'dev/g1/headless/atak-headless' | xargs -0 -n1 bash -n
 	@if command -v shellcheck >/dev/null 2>&1; then \
-		git ls-files -z 'dev/**/*.sh' | xargs -0 -n1 shellcheck; \
+		git ls-files -z 'dev/**/*.sh' 'dev/g1/headless/atak-headless' | xargs -0 -n1 shellcheck; \
 	else \
 		echo "[lint] skip: shellcheck not installed"; \
 	fi

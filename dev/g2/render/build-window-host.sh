@@ -14,8 +14,16 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # dev/g2/render
 G2="$(cd "$HERE/.." && pwd)"
 OUT="$G2/build/window-host.dylib"
 
-JDK="$(/usr/libexec/java_home -v 1.8 2>/dev/null || true)"
-[[ -n "$JDK" ]] || { echo "build-window-host.sh: JDK 1.8 not found" >&2; exit 2; }
+# JAVA_HOME wins when the caller pins a JDK (CI's setup-java exports it);
+# /usr/libexec/java_home -v 1.8 otherwise, loudly when neither has one.
+if [[ -n "${JAVA_HOME:-}" ]]; then
+  JDK="$JAVA_HOME"
+  [[ -d "$JDK/include" ]] \
+    || { echo "build-window-host.sh: JAVA_HOME=$JDK has no include/ — JNI headers missing" >&2; exit 2; }
+else
+  JDK="$(/usr/libexec/java_home -v 1.8 2>/dev/null || true)"
+  [[ -n "$JDK" ]] || { echo "build-window-host.sh: JDK 1.8 not found (set JAVA_HOME)" >&2; exit 2; }
+fi
 
 if [[ ! -f "$OUT" ]] || [[ "$HERE/WindowHost.m" -nt "$OUT" ]]; then
   mkdir -p "$(dirname "$OUT")"

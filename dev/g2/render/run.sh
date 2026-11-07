@@ -81,7 +81,11 @@ if [[ ! -f "$BC_JAR" ]]; then
   mv "$BC_JAR.tmp" "$BC_JAR"
 fi
 CP="$CP:$BC_JAR"
-for j in ${CP//:/ }; do
+# Split on ':' only — ${CP//:/ } also splits on spaces, so a space anywhere
+# in $HOME or MACTAK_NATIVE_DIST false-failed the whole classpath check.
+IFS=: read -r -a CP_JARS <<< "$CP"
+for j in "${CP_JARS[@]}"; do
+  [[ -n "$j" ]] || continue
   [[ -f "$j" ]] || { echo "render/run.sh: missing jar: $j" >&2; exit 2; }
 done
 

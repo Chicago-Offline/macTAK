@@ -105,6 +105,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   twice; the second call was meant to be `isDirectory`, so the directory
   branch was unreachable and every directory returned `TE_IllegalState`.
   (`dev/g1/patches/ioproviderfactory-guards-and-filecount.patch`)
+- JNI class-init failure masking (wave 6, systemic): every class/init
+  function in the JNI tree guarded its lookups with an unconditional
+  `return true` — a failed `FindClass`/`GetMethodID` stored null method
+  IDs, reported success, and turned every later call on those IDs into
+  undefined behavior. The sweep guards 46 live init functions across 40
+  files (house `if(!x) return false;` shape; `SET_METHOD_DEFINITION` /
+  `SET_FIELD_DEFINITION` macros carry the guard inside; inline
+  `GetStaticObjectField`/`GetStaticFieldID` chains hoist a guarded
+  `jfieldID`), and common.cpp's `JNI_OnLoad`/`ATAKMapEngineJNI_equals`
+  lookups are guarded or exception-cleared. The Class/EngineLibrary
+  block in `JNI_OnLoad` stays failure-tolerant by design — guarding it
+  with early returns makes the JVM eagerly link `EngineLibrary` at load,
+  whose verification needs bcprov the smoke classpath doesn't carry.
+  (11 patches, `dev/g1/patches/*sweep*.patch` +
+  `common-onload-classloader-guards.patch` +
+  `textformat2-class-init-consumer-guards.patch`; notes in
+  `dev/g1/NOTES.md` G1.8)
+- Core Interop entry gates (wave 6, closes the wave-5 `NewObject` ×2
+  residual): `GeoPoint_interop_entry`/`NativeProjection_interop_entry`
+  now report their init result and the five callers gate —
+  `Interop_copy` returns `TE_IllegalState`, `Interop_create` and both
+  `Interop_wrap` overloads return `NULL` instead of calling
+  `NewObject`/`CallBooleanMethod` against null method IDs.
+- ManagedProjection scalar getters (wave 6 residual): `getMinLatitude`,
+  `getMinLongitude`, `getMaxLatitude`, `getMaxLongitude`, `is3D` and
+  `getSpatialReferenceID` bail with neutral values (`NAN`/`false`/`0`)
+  when their method ID never resolved, instead of passing NULL into
+  `Call*Method`.
+- ManagedTextFormat2 desktop degradation (wave 6): every lookup in its
+  init fails on desktop JVMs (the classes live in the Android app
+  package), so the text-format consumers (`getStringWidth`,
+  `getCharWidth`, `getCharHeight`, `getDescent`, `getStringHeight`,
+  `getBaselineSpacing`, `getFontSize`, `loadGlyph`) and
+  `ManagedTextFormatFactory::createTextFormat` now gate on the method
+  IDs they use and return neutral values or `TE_Err` instead of calling
+  through null.
+  (`dev/g1/patches/textformat2-class-init-consumer-guards.patch`)
 
 ## [0.3.1] - 2026-11-07 — G2: window surfaces (M3.0–M3.1) + hardening
 

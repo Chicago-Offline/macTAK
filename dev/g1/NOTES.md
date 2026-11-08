@@ -495,3 +495,94 @@ Report-only observations (seen in the audit, deliberately not patched):
 - The reference-returning `getSubject()` pattern (null → deref hazard) is
   endemic across the JNI bridge; wave 4 covers the `ManagedGLLayer2`
   surface only.
+
+## G1.7 — wave 5: JNI bridge hygiene sweep (F5–F13) + two engine fixes
+
+Seven patches in `dev/g1/patches/`, cut from the wave-5 smell test (F5–F13
+plus the two wave-4 report-only engine observations, A and B) after a
+line-by-line verification pass. Patch mechanics as wave 4: scripted edit of
+a pristine tree staged at `/tmp/g1wave5/{a,b}/tmp/takeng-src/`, `diff -u`
+with explicit `a/…`/`b/…` labels, applied by `build-native.sh` at -p3 in
+glob order. The generator/verifier (`gen_patches.py`) and the roster audit
+(`audit_roster.py`) live in `/tmp/g1wave5/`.
+
+Engine fixes (the two wave-4 report-only items, now closed):
+
+- `glbatchshaders-dead-store.patch` (A) — `GLBatchGeometryShaders.cpp:179`
+  stored `aRotation`'s uniform location into `aColor`; the real `aColor`
+  attrib lookup overwrote it lines later. Dead store removed, nothing
+  else.
+- `glmapview2-srid-capability.patch` (B) — `GLMapView2.cpp:3250` picked
+  the terrain local frame by `tile.data_proj.srid == state.drawSrid`,
+  while `GLGlobe.cpp:3048` picks by the active shader family
+  (`shader.aEcefVertCoords >= 0` — the ECEF shaders consume the
+  re-projected mesh). In planar mode with elevation data already in the
+  draw SRID the planar pass concatenated the projected data's local
+  frame. Aligned on capability; `shader` was already in scope and the
+  wave-4 attrib guards use the same member three lines up.
+
+JNI guards (F5–F13; the wave-4 house pattern throughout — describe once,
+`ExceptionClear`, then a neutral return or a clean continue; the
+`jioproviderfactory` sites use that file's own bare-`Clear` template):
+
+- `jglobe-listener-guards.patch` (F5) — the nine `CallbackForwarder`
+  dispatches; `onMapMoved` fires per camera frame (the wave-4 F2 poisoning
+  pattern). `impl` is a strong global ref, so the missing guard was the
+  only defect.
+- `jglmapview-forwarder-guards.patch` (F6) — the two
+  `CameraChangedForwarder` dispatches returned bare `TE_Ok` past an
+  unguarded `CallVoidMethod`; a throw now maps to `TE_Err`. The rest of
+  the file (weak-ref + cleared-check discipline) is untouched.
+- `managedrendercontext-guards.patch` (F7) — all 16 sites: the scalar
+  getters capture, guard and return their neutral value (a throw leaves
+  garbage in the JNI call's return register), the dispatch methods map to
+  `TE_Err`, the dtor's `destroyChildContext` clears (no return possible),
+  `createChildContext` guards both the capability probe and the create
+  call, and the `getRenderSurface` helper clears so a throw no longer
+  escapes the `NOTHROWS` constructor with the surface left mid-init.
+- `projection-math-interop-guards.patch` (F8/F9/F10, F11 riding) —
+  `ManagedProjection::forward/inverse` (the per-frame projection marshal
+  path) guard before each null check; the shared `Interop_create` GeoPoint
+  helper clears its own throw so its null return is clean for every
+  caller; core `Interop`'s per-frame `MapSceneModel` export no longer
+  returns `TE_Ok` past a failed `NewObject`, and its in-place marshal's
+  `init()` dispatch is guarded; the `math/Interop` marshals gain
+  null-argument guards (F10 — a null `jobject`/`Rectangle2*` there is a
+  JVM crash, not a catchable exception) plus `NewObject` guards; and the
+  model resource-map marshal loop is guarded per call (F11, defensive —
+  entry-check-gated today).
+- `ioproviderfactory-guards-and-filecount.patch` (F13+F12) — `remove` and
+  `mkdirs` join the file's canonical `ExceptionCheck → Clear → TE_Err`
+  their 11 siblings already had (a `SecurityException` fed garbage into
+  the jboolean — coin-flip result, exception pending), as does
+  `createTempFile`'s `getAbsolutePath` follow-up (caught by the post-patch
+  sweep, same pattern); and `getFileCount`'s second probe is
+  `isDirectory`, not a duplicated `isFile` — the directory branch was
+  unreachable, so every directory returned `TE_IllegalState` from the
+  fall-through (F12, a real logic bug).
+
+Roster validation (`audit_roster.py`, scripted re-sweep — validates, does
+not discover): heuristic is JNI `Call*`/`New*Method` sites with no
+`ExceptionCheck` in the following 8 lines. Pristine tree: 34 files / 151
+sites (the planning pass pinned 18 files with a stricter result-used
+filter; every planning-roster file appears here). Post-patch: 27 files /
+102 sites, and the eight touched files drain to zero or to the residuals
+below — jglobe 9→0, jglmapview 2→0, ManagedRenderContext 16→0, math
+Interop 2→0, model Interop 4→0, jioproviderfactory 5→0,
+ManagedProjection 9→6, core Interop 5→2.
+
+Report-only residuals (deliberately not patched this wave):
+
+- `ManagedProjection` scalar getters ×6 (`getSpatialReferenceID`, min/max
+  latitude/longitude, `is3D`) — scene-setup cadence, not the per-frame
+  marshal path; the F7 capture-and-guard shape applies verbatim when a
+  later wave picks them up.
+- core `Interop` `Interop_wrap` NativeProjection `NewObject` ×2
+  (pristine `Interop.cpp:190`/`:200`) — adapter-construction path, not
+  the per-frame export.
+- The systemic `*_class_init` failure masking (returns `true`
+  unconditionally) — unchanged since the smell test; a failed class init
+  turns every later call on those method IDs into undefined behavior.
+  Worth its own wave.
+- `jnativegllayer3.cpp` remains clean; the `NewWeakGlobalRef` enum
+  caching pattern is OK as found.

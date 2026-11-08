@@ -1,0 +1,10 @@
+--- a/tmp/takeng-src/cpp/renderer/feature/GLBatchGeometryShaders.cpp
++++ b/tmp/takeng-src/cpp/renderer/feature/GLBatchGeometryShaders.cpp
+@@ -176,7 +176,6 @@
+     shader.uTanHalfFov = glGetUniformLocation(shader.handle, "uTanHalfFov");
+     shader.uViewportHeight = glGetUniformLocation(shader.handle, "uViewportHeight");
+     shader.uDrawTilt = glGetUniformLocation(shader.handle, "uDrawTilt");
+-    shader.aColor = glGetUniformLocation(shader.handle, "aRotation");
+     shader.aPointSize = glGetAttribLocation(shader.handle, "aPointSize");
+     shader.aRotation = glGetAttribLocation(shader.handle, "aRotation");
+     shader.aVertexCoords = glGetAttribLocation(shader.handle, "aVertexCoords");

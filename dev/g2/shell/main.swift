@@ -327,7 +327,6 @@ final class Shell: NSObject, NSApplicationDelegate {
         // delegate's timers never fire, so NSApp.reply could never happen.
         // Instead: ask the render thread to wind down and wait for EXITED
         // with a bounded run-loop pump, then terminate for real.
-        print("\(SHELL): shouldTerminate — poll \(st), asking the render thread to wind down")
         jniCallVoid(midStop)
         if !stopRequestedByUs { stopRequestedByUs = true }
         stopRequestedAt = Date()

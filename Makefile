@@ -115,6 +115,19 @@ test-render-window: build-window-host
 		--layer dev/g1/headless/test/fixtures/sf-landmarks.geojson \
 		--out dev/g2/build/render-window-layer.png
 
+# M3.2 shell compile (no run): swiftc/clang over dev/g2/shell — what CI can
+# do without a GUI session.
+build-shell:
+	bash dev/g2/shell/run.sh --compile-only
+
+# M3.2 dev-Mac GUI gate: the AppKit shell boots the JVM in-process (libjli →
+# JNI_CreateJavaVM), opens an NSWindow over its own CAMetalLayer and upcalls
+# WindowApp.start; the render thread lifts the RenderSmoke body, draws
+# Globe+layers into the window and parks. The window auto-closes --linger ms
+# after the first presented frame; the readback PNG is the artifact.
+test-shell: build-shell
+	bash dev/g2/shell/run.sh --out dev/g2/build/shell-frame.png
+
 # M3.0 manual gate (dev Mac, GUI session): `angle` stages the ANGLE pair and
 # runs the headless pbuffer canary first, then the window opens for ~3 s and
 # auto-closes, leaving the pre-swap readback as the artifact.
@@ -129,7 +142,7 @@ smoke-window: angle
 lint:
 	@git ls-files -z 'dev/**/*.sh' 'dev/g1/headless/atak-headless' | xargs -0 -n1 bash -n
 	@if command -v shellcheck >/dev/null 2>&1; then \
-		git ls-files -z 'dev/**/*.sh' 'dev/g1/headless/atak-headless' | xargs -0 -n1 shellcheck; \
+		git ls-files -z 'dev/**/*.sh' 'dev/g1/headless/atak-headless' | xargs -0 -n1 shellcheck -x; \
 	else \
 		echo "[lint] skip: shellcheck not installed"; \
 	fi

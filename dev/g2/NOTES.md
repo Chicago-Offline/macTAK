@@ -1,5 +1,19 @@
 # dev/g2 — G2: map renders in a native macOS window (ANGLE on Metal)
 
+## State (M3.2 — 2026-11-07): the Swift/AppKit shell boots the JVM in-process and hosts the window; `make test-shell` is green
+
+`shell/main.swift` is the host now: it dlopens `libjli`
+(`JNI_CreateJavaVM`), builds the ANGLE-on-Metal `NSWindow`/`CAMetalLayer`,
+and upcalls `WindowApp.start(layerPtr, …)` — the engine renders into the
+shell's own layer on the JVM side while AppKit owns the main thread. The
+gate ladder is green end-to-end on the dev Mac: `make lint`, `make
+test-render` 3/3 (now compile-if-stale through the shared `render/env.sh`),
+`make test-render-window` 2/2, and **`make test-shell` exit 0** — window
+opens, 5 frames present, readback PNG written by an AWT-free PNG encoder,
+frame-done → 4 s linger → stop → teardown → EXITED → clean exit. CI
+compiles the shell (`shell-compile` job); the run stays a dev-Mac gate
+(same split as M3.0). Section "M3.2" below.
+
 ## State (M3.1 — 2026-11-06): window natives + dynamic-size context, exercised through a real window surface, gated in CI
 
 `RenderSmoke --window W×H` swaps the init pbuffer for a window surface:
@@ -728,3 +742,89 @@ changes nothing at runtime. The mechanism:
 `engine-shadows/` is distinct from `src/`'s shadows (`EngineLibrary`,
 `AtakMapView`, `android.*`): those are **replacements** we own; these are
 **upstream + patch** we do not edit by hand.
+
+## M3.2 — the shell: JVM in-process, ANGLE window hosted by AppKit (2026-11-07)
+
+`dev/g2/shell/` is the M3 host model made real: `jni_boot.c` + `bridge.h`
+(clang, against the JDK's `jni.h`) find and dlopen `libjli.dylib` and run
+`JNI_CreateJavaVM` with `-Djava.library.path`, headless AWT and the GDAL
+data dir as options; `main.swift` (swiftc -O) builds the `NSWindow` over a
+`MetalView` whose private `CAMetalLayer` crosses JNI as an opaque `jlong`,
+then upcalls `mactak.render.WindowApp.start` (15 params) and idles in
+AppKit's run loop, polling `WindowApp.pollStatus()` every 100 ms. The
+`WindowApp` statics are the RenderSmoke body reshaped for embedding: the
+render thread draws the M2/M3.1 stack into the window surface, publishes
+`PHASE_FRAME_DONE`, **parks** (the window stays up for the shell's
+`--linger`), and tears down on its own thread (the EGL context never
+leaves it) once `stop()` wakes it, ending in `PHASE_EXITED` for the shell
+to exit with its code. Entry points: `make build-shell` (compile-only —
+CI), `make test-shell` (the GUI gate; `shell/run.sh` shares `render/env.sh`
+so shell and smoke build the very same classes).
+
+### Gate results (this box, 2026-11-07)
+
+- `make lint` — bash -n + shellcheck (-x now, see #47) + markdownlint +
+  actionlint, clean.
+- `make test-render` — 3/3 PASS (bare, GeoJSON layer, MBTiles basemap +
+  layer), first exercise of the run.sh/env.sh refactor.
+- `make test-render-window` — 2/2 PASS (window surface + mid-run resize).
+- `make test-shell` — exit 0: `CAMetalLayer @ 0x…` → EGL 1.5 metal window
+  surface → 5 frames, 0 failed presents, sentinel 0, `PASS` → linger 4 s →
+  `poll → 2` → `exiting with WindowApp's code 0`. Artifact:
+  `dev/g2/build/shell-frame.png` (640×480 RGB PNG, hand-written encoder —
+  see #44).
+
+### Bootstrap notes (JNI layering ground truth)
+
+- This JDK's `jni.h` (C mode) defines `JNIEnv` as
+  `const struct JNINativeInterface_ *`, so `mactak_env()` returning
+  `JNIEnv *` is ABI-correct. In Swift the function table is
+  `env.pointee!.pointee` (the middle deref is optional), and **every table
+  call takes `env` as its first argument** — the Swift equivalent of C's
+  `(*env)->Fn(env, …)`.
+- A first "fix" that returned `JNIEnv` by value was one deref too shallow;
+  the build exposed the real layout and the original signatures came back.
+- Swift's top-level scope cannot capture top-level `guard let` bindings —
+  the pattern is plain `let` → nil-check → force unwrap, or move the state
+  into a class (`Shell` owns `opt`/`midPoll`/`midExit`/`midStop`).
+- Signature strings must be cross-checked against `javap -s -p`: doing so
+  caught `SIG_START` written `…DDDJI)V` where the class says `…DDDIJ)V`
+  (frames/settleMs widths swapped) and a missing `[` on the first
+  `String[]` — both would have failed `GetStaticMethodID` at runtime as
+  `NoSuchMethodError` with no hint where to look.
+
+### Teardown decision (why the shell never joins the JVM)
+
+`DestroyJavaVM` blocks until every non-daemon thread ends, which inverts
+control: the AppKit main thread would wait on the render thread it is
+supposed to be supervising. Instead the shell treats the JVM as a
+subsystem: `stop()` (a `WindowApp.class.notifyAll()` on the monitor the
+render thread parks on) asks the render thread to wind down **on its own
+thread**; the shell polls `pollStatus()` for `PHASE_EXITED` and only then
+terminates AppKit, exits with `WindowApp`'s exit code, and leaves the JVM
+alive for `exit(3)` to reap. Bounded fallbacks: a teardown still running
+after 10 s (user-quit path) or 30 s (linger path) is reported and the
+process exits with the last known exit code.
+
+### Traps found on the way (#43–#47)
+
+| trap | what it is / what now guards it |
+|------|---------------------------------|
+| #43 | **AWT must not initialize inside the shell's process.** `writePng`'s `BufferedImage`/`ImageIO` pulled AWT up mid-run: `JRSAppKitAWT markAppIsDaemon` ("Process manager already initialized: can't fully enable headless mode") and an `AWT-AppKit` daemon appeared — AWT fights our own `NSApplication` for the AppKit main thread. `WindowApp.writePng` is now a hand-rolled PNG encoder (zlib IDAT, CRC32 chunks, RGB8, filter 0) with no AWT import; `RenderSmoke` keeps ImageIO — a standalone JVM hosts no `NSApplication` to fight over. Guard: comment at the encoder; anything drawing a frame in-process stays AWT-free until M3.4's loop replaces the framing. |
+| #44 | **`.terminateLater` wedges the quit handshake.** Returning it from `applicationShouldTerminate` makes AppKit run a private nested run-loop mode inside `-terminate:`; timers scheduled in `.default`/`.common` never fire there, so the `NSApp.reply(toApplicationShouldTerminate:)` the design counted on can never happen (proven by `sample`: main parked in `_shouldTerminate`'s nested `mach_msg`, render thread long gone). The shell now never returns `.terminateLater`: linger-winddown happens in `tick()` first, and the user-quit path asks `stop()` and pumps `RunLoop.main.run(mode: .default)` with a 10 s bound before `.terminateNow`. |
+| #45 | **`PHASE_FRAME_DONE` was documented but never published** — the render thread parked without setting it, so the shell's linger timer never started and the window stayed up forever. Now set inside the park's `synchronized` block before `wait()`. Guard: `make test-shell` fails by timeout without it; the shell logs `poll → 1` on the transition. |
+| #46 | **stdout is fully buffered when redirected** — Swift `print` lines (frame-done, poll transitions) sat in an 8 KB buffer while the gate hung, hiding exactly the evidence needed. `setvbuf(stdout, nil, _IOLBF, 0)` at startup makes the gate log live. |
+| #47 | **shellcheck can't follow `source "$HERE/env.sh"`** — SC1091 fails `make lint`, and a bare `source=` directive resolves against the invocation CWD. The scripts carry `# shellcheck source-path=SCRIPTDIR source=…` and `make lint` runs shellcheck `-x`, so the sourced `env.sh` is checked into the bargain. |
+
+Also fixed en route: `stop()`'s `notifyAll()` written against a static
+context (a compile error once the park was real) — it notifies on
+`WindowApp.class`, the monitor the park waits on; and `start()`'s lambda
+captured reassigned locals (`layers`/`basemaps` null-defaulting) — now
+`final` locals.
+
+### CI split
+
+`shell-compile` job (macos-26, Zulu 8 headers via setup-java): `make
+build-shell` only — clang/swiftc, no engine, no GUI session. The run gate
+stays `make test-shell` on the dev Mac, unchanged from the M3.0 decision
+(CI has no WindowServer session). Roadmap flips M3.2 → DONE at merge.

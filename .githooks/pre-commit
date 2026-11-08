@@ -18,7 +18,7 @@ while IFS= read -r f; do
     case "$f" in
         *.sh)
             if [ "$HAVE_SHELLCHECK" -eq 1 ]; then
-                if ! shellcheck "$f"; then
+                if ! shellcheck -x "$f"; then
                     echo "[pre-commit] shellcheck failed: $f"
                     fail=1
                 fi

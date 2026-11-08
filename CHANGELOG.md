@@ -7,6 +7,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added
+
+- M3.2 shell (`dev/g2/shell/`): the Swift/AppKit host — `jni_boot.c` finds
+  `libjli` and boots the JVM in-process (`JNI_CreateJavaVM`), `main.swift`
+  opens an `NSWindow` over its own `CAMetalLayer` and upcalls
+  `mactak.render.WindowApp.start`; the JVM's render thread draws the
+  M2/M3.1 stack into the shell's layer (ANGLE on Metal), publishes
+  frame-done, parks for the shell's `--linger`, and tears down on its own
+  thread at `stop()` before the shell exits with its exit code. The frame
+  write uses a hand-rolled AWT-free PNG encoder — AWT must not initialize
+  inside a process that owns an `NSApplication` (`dev/g2/NOTES.md` #43).
+- `make build-shell` (compile-only, CI) and `make test-shell` (the
+  dev-Mac GUI gate: window opens, 5 frames present, readback PNG,
+  linger → stop → EXITED → exit 0); `shell/run.sh` shares
+  `render/env.sh` with the render smoke so both build the same classes.
+- CI: `shell-compile` job (macos-26, Zulu 8 headers) compiles the shell;
+  the run stays a dev-Mac gate like M3.0's smoke-window split.
+
 ### Fixed
 
 - JNI layer bridge: a Java exception thrown inside a `GLLayer3` callback no

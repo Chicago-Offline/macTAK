@@ -42,6 +42,51 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   program today, so -1 can only fire on a compile/link failure — the
   guards keep such a failure from poisoning the frame's GL error state.
   (same `attrib-location-guards.patch`)
+- Terrain local frame (wave 5): `GLMapView2` picks the terrain tile's
+  local frame from the active shader family's ECEF capability
+  (`aEcefVertCoords >= 0`), as `GLGlobe` already did, instead of SRID
+  equality between the projected elevation data and the draw SRID — a
+  planar pass could concatenate the projected data's local frame whenever
+  the elevation cache already held data in the draw SRID.
+  (`dev/g1/patches/glmapview2-srid-capability.patch`)
+- Batch geometry (wave 5): `GLBatchGeometryShaders` no longer stores
+  `aRotation`'s uniform location into `aColor` — a dead store (the real
+  `aColor` attribute lookup overwrote it a few lines later), kept from
+  wave 4 as a report-only foot-gun.
+  (`dev/g1/patches/glbatchshaders-dead-store.patch`)
+- JNI bridge exception hygiene (wave 5): the remaining unguarded JNI
+  dispatches on the live render-thread surface report (once) and clear a
+  thrown Java exception instead of leaving it pending, where it turned
+  every later JNI call on the thread into a silent failure:
+  `jglobe.cpp`'s nine `CallbackForwarder` map-listener dispatches
+  (`onMapMoved` fires per camera frame)
+  (`jglobe-listener-guards.patch`); `jglmapview.cpp`'s two
+  `CameraChangedForwarder` dispatches map a throw to `TE_Err` instead of
+  a bare `TE_Ok` (`jglmapview-forwarder-guards.patch`); and
+  `ManagedRenderContext`'s 16 sites — scalar getters return their neutral
+  value, dispatch methods `TE_Err`, and the `getRenderSurface` helper
+  clears so a throw no longer escapes the `NOTHROWS` constructor
+  (`managedrendercontext-guards.patch`).
+- JNI projection/math interop (wave 5): `ManagedProjection::forward` and
+  `inverse` — the per-frame projection marshal path — map a throw to
+  `TE_Err` before their null checks, and the shared `Interop_create`
+  GeoPoint helper clears its own throw; core `Interop`'s per-frame
+  `MapSceneModel` export no longer returns `TE_Ok` past a failed
+  `NewObject` and its in-place `init()` dispatch is guarded. The
+  `math/Interop` marshals gain null-argument guards (a null `jobject`
+  there is a JVM crash, not a Java exception) plus `NewObject` guards,
+  and the model resource-map marshal loop is guarded per call — those
+  three are defensive only today.
+  (`dev/g1/patches/projection-math-interop-guards.patch`)
+- IOProviderFactory JNI (wave 5): `remove` and `mkdirs` use the file's
+  own canonical `ExceptionCheck → Clear → TE_Err` guard their 11 sibling
+  methods already had — a `SecurityException` previously fed garbage into
+  the boolean, a coin-flip result with the exception still pending — as
+  does `createTempFile`'s `getAbsolutePath` follow-up.
+- IOProviderFactory file counts (wave 5): `getFileCount` called `isFile`
+  twice; the second call was meant to be `isDirectory`, so the directory
+  branch was unreachable and every directory returned `TE_IllegalState`.
+  (`dev/g1/patches/ioproviderfactory-guards-and-filecount.patch`)
 
 ## [0.3.1] - 2026-11-07 — G2: window surfaces (M3.0–M3.1) + hardening
 

@@ -298,6 +298,31 @@ jobs:
             hs_err_pid*.log
           if-no-files-found: error
 
+  shell-compile:
+    name: shell compile (macOS arm64)
+    # G2 M3.2: the Swift/AppKit shell compiles on CI (clang over jni_boot.c +
+    # swiftc over main.swift against the JDK's jni.h — no engine, no GUI
+    # session). The run itself opens an NSWindow, so it stays the dev-Mac
+    # manual gate (`make test-shell`), the same split as M3.0's compile-only
+    # smoke-window step in the render-angle job.
+    needs: changes
+    runs-on: macos-26 # Xcode 26 toolchain — matches the verified local build
+    timeout-minutes: 10
+    steps:
+      - name: Check out macTAK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Zulu 8 (arm64)
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: zulu
+          java-version: '8'
+          architecture: aarch64
+
+      - name: Compile the shell (build-shell.sh, no run)
+        if: needs.changes.outputs.changed == 'true'
+        run: make build-shell
+
   commo-stack:
     name: comms stack (macOS arm64)
     needs: changes

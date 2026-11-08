@@ -586,3 +586,109 @@ Report-only residuals (deliberately not patched this wave):
   Worth its own wave.
 - `jnativegllayer3.cpp` remains clean; the `NewWeakGlobalRef` enum
   caching pattern is OK as found.
+
+## G1.8 — wave 6: `*_class_init` failure-masking sweep (F14) + wave-5 residual closures (F15–F18)
+
+Eleven patches in `dev/g1/patches/`, cut from a scripted audit of every
+class/init function in the JNI tree (F14) plus the three wave-5
+report-only residuals (F15–F18). Patch mechanics as waves 4/5: scripted
+edit of the post-wave-5 tree staged at `/tmp/g1wave6/{a,b}/tmp/takeng-src/`,
+`diff -u` with explicit `a/…`/`b/…` labels, applied by `build-native.sh`
+at -p3 in glob order — patch names chosen so every wave-6 patch that
+touches a file a committed patch also touches sorts strictly AFTER it
+(e.g. `jglobe-sweep-guards` after `jglobe-listener-guards`,
+`projection-sweep-hygiene` after `projection-math-interop-guards`). The
+audit/generator/verifier (`class_init_audit.py`, `guard_inits.py`,
+`fix_inline.py`, `gen_patches.py`) live in `/tmp/g1wave6/`.
+
+Audit numbers (live desktop TUs; `c3dt/`, `vsi_jfile.cpp` and
+`jvsijfilefilesystemhandler.cpp` are compiled out and were skipped): 46
+init functions — 42 fully masked (lookups present, zero guards,
+unconditional `return true`), 3 partial (wave-5 enum-section guards
+only), 1 already fully guarded (`jgeocalculations.cpp`, the reference
+shape). 25 `static bool clinit = …` call sites never read their result.
+Post-sweep re-audit on the edited tree: fully guarded 34, the remaining
+partials are counter artifacts (preproc `SET_METHOD_DEFINITION` lines
+counted, but the macros themselves now guard) or deliberate
+`NewWeakGlobalRef` residuals.
+
+- `jni-class-init-guards.patch` (F14, 27 files) — the sweep: every
+  `FindClass`/`Get*ID` assignment in every masked init body now guards
+  (`if(!x) return false;`, the `jgeocalculations` house shape); inline
+  `New*Ref(env.GetStaticObjectField(E, env.GetStaticFieldID(E, …)))`
+  chains hoist the field ID into a guarded `jfieldID` local and reuse it.
+- The macro half of F14 (8 files) — `SET_METHOD_DEFINITION` /
+  `SET_FIELD_DEFINITION` definitions in `ManagedLayer`,
+  `ManagedRenderContext`, `ManagedVisibilityListener`, `ManagedGLLayer2`,
+  `ManagedGLMapRenderable2`, `jglmapview`, `jglobe` and core `Interop`
+  gained the guard lines inside the macro (the generator deliberately
+  leaves preprocessor lines to hand edits).
+- `common-onload-classloader-guards.patch` (F15) — `JNI_OnLoad` guards
+  the `ClassLoader_class.id`/`loadClass` lookups (`return JNI_ERR`) and
+  `ATAKMapEngineJNI_equals` guards its `java/lang/Object` lookups
+  (`return false`).
+- `projection-sweep-hygiene.patch` (F14 for the four files wave-5's
+  `projection-math-interop-guards` also touches — core/math/model
+  `Interop.cpp` + `ManagedProjection.cpp`; sorts after it by name).
+- The entry/getter half of F16/F17 lives in the same file set: core
+  `Interop` `GeoPoint_interop_entry`/`NativeProjection_interop_entry`
+  become `bool` and all five call sites gate (`Interop_copy` ×2 →
+  `TE_IllegalState`, `Interop_create`/`Interop_wrap` ×2 → `NULL`) — the
+  wave-5 `NewObject` ×2 residual; the six `ManagedProjection` scalar
+  getters bail on a null method ID — doubles `NAN`,
+  `getSpatialReferenceID` 0, `is3D` false.
+- `textformat2-class-init-consumer-guards.patch` (F18) — the sweep
+  showed every lookup in `ManagedTextFormat2_init`/`Factory_init` fails
+  on desktop JVMs (com.atakmap.android/`android.graphics` classes are
+  absent), so the consumers gate on the method IDs they use:
+  `getStringWidth`/`getCharWidth`/`getCharHeight`/`getDescent`/
+  `getStringHeight`/`getBaselineSpacing` return 0, `getFontSize` 0,
+  `loadGlyph` and `createTextFormat` return `TE_Err` — graceful
+  degradation instead of a null-methodID crash if the desktop ever
+  routes text through these classes.
+- One patch per remaining wave-5-overlapping file, name-sorted safe:
+  `jglobe-sweep-guards`, `jglmapview-sweep-guards`,
+  `managedrendercontext-sweep-guards`,
+  `ioproviderfactory-sweep-init-guards`, `jnilayer2-sweep-guards`,
+  `jnilayerspi2-sweep-guards`, `jni-renderable-sweep-guards`.
+
+### Traps found on the way (do not rediscover these)
+
+- **Do not guard `FindClass("com/atakmap/map/EngineLibrary")` in
+  `JNI_OnLoad` with an early return.** The first cut of F15 did exactly
+  that and failed `make build`'s canary 3/3 deterministically (2/2 with
+  the guards, 1/1 without, bisected to the ClassLoader hunk alone): the
+  JVM eagerly *links* `EngineLibrary` at that `FindClass`, its
+  verification resolves `new BouncyCastleProvider` (g2 NOTES item 4),
+  and the g1 smoke classpath carries no bcprov — the guard turns a
+  tolerated NULL into a fatal `NoClassDefFoundError` out of
+  `System.load`. The Class/EngineLibrary sub-block is failure-tolerant
+  by design (`ATAKMapEngineJNI_findClass` null-guards `library`/`runtime`
+  downstream); the wave-6 form keeps the original control flow and adds
+  `ExceptionClear` hygiene only. The `id`/`loadClass` guards stay — they
+  cannot fire on a healthy JVM (the wrapper clears internally, no
+  pending exception leaks).
+- The generator's first cut kept the inline `GetStaticObjectField`
+  statement alongside its hoisted `jfieldID` copy (duplicate lookup);
+  `fix_inline.py` rewrites the statement to consume the hoisted ID.
+  Verified by re-grepping the tree for the inline shape (0 hits).
+
+### Report-only residuals (deliberately not patched this wave)
+
+- Bare `NewWeakGlobalRef` enum-cache results (`ManagedElevationSource`,
+  `ManagedFeatureDataSource2`) — the wave-4/5 house style leaves them
+  unguarded (null only on OOM); kept consistent.
+- 25 `clinit` results unread at their call sites outside this wave's
+  roster (constructors store the static-local and move on); gating those
+  consumers is the wave-7 item now that the init bodies themselves
+  report failure honestly.
+- The wave-5 residuals list shrinks by three: scalar getters ×6 (done),
+  `Interop_wrap` `NewObject` ×2 (done), systemic class-init masking
+  (done); `jnativegllayer3` stays clean.
+
+Evidence: `make build` PASS (stub + JVM smoke 3/3 + commo smoke),
+`make build-angle` PASS, `make test-render` PASS (bare + GeoJSON +
+MBTiles basemap), `make test-render-window` PASS (bare + layer,
+`glErrors=0`). The patch verifier replays gdal-drift + the 18 committed
+patches + the 11 wave-6 patches onto a pristine engine copy in glob
+order and asserts the JNI tree equals the edited tree byte-for-byte.

@@ -30,10 +30,10 @@ Upstream already ships a macOS JNI build config (`src/main/jni/cmake/
 APPLE assembly and then applies the same G0 substitutions:
 
 - sources from upstream lists, minus **`c3dt/`** (3D tiles/GLTF — later
-  rung) and minus **`vsi_jfile.cpp` + `jvsijfilefilesystemhandler.cpp`**
-  (GDAL VSI API drift — overrides pre-drift `VSIFilesystemHandler`
-  signatures; same drift family as the LAS exclusion; revisit at the
-  ttp-dist rung)
+  rung). ~~Minus `vsi_jfile.cpp` + `jvsijfilefilesystemhandler.cpp` (GDAL
+  VSI API drift)~~ — `vsi_jfile.cpp` rejoined 2026-11-09 via
+  `patches/vsi-jfile-gdal3-api.patch` (G2.4 b.1a, `dev/g2/NOTES.md`); the
+  companion TU never existed at the pin.
 - defs: upstream macOS (`RTTI_ENABLED`, `TE_GLES_VERSION=3`) minus
   `SQLITE_HAS_CODEC` (SQLCipher rung)
 - includes: work-copy `cpp/` + `jni/`, Homebrew, khronos, stl-soft,
@@ -111,7 +111,8 @@ JDK; the smoke does). `build-native.sh` still runs verbatim.
   round-trip traps (port-role swap 8087/8089, handshake-before-
   registration, restart FTS container between runs) are catalogued in
   `dev/spike/g0/pathway-a.md`.
-- c3dt + VSI TUs rejoin at the ttp-dist rung; SQLCipher at the encryption
+- c3dt rejoins at the ttp-dist rung (the VSI TU already has, G2.4 b.1a);
+  SQLCipher at the encryption
   rung; core install_name stays build-absolute (native-dist is built and
   consumed on the same machine — revisit if dylibs ever ship cross-machine).
 

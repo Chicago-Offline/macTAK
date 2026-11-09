@@ -8,9 +8,9 @@
 # the GLES shim), dev/g2/render/engine-shadows and dev/g1/headless/src
 # (LayerStore/NativeGdal).
 #
-# Sets: DIST VER M2 OUT JDK CP (plus G2 ROOT G1 ENV_SH_DIR — the sourcing
-# script should use these rather than derive its own). Exports nothing:
-# callers add the JVM's GDAL_DATA / MACTAK_HOME themselves.
+# Sets: DIST VER M2 OUT JDK CP GDAL_JAVA (plus G2 ROOT G1 ENV_SH_DIR — the
+# sourcing script should use these rather than derive its own). Exports
+# nothing: callers add the JVM's GDAL_DATA / MACTAK_HOME themselves.
 # Exits (killing the sourcing shell) when the environment is unusable.
 
 ENV_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # <repo>/dev/g2/render
@@ -40,7 +40,21 @@ JDK="${JAVA_HOME:-$("/usr/libexec/java_home" -v 1.8 2>/dev/null || true)}"
 jar() { if [[ -f "$1" ]]; then echo "$1"; else echo "$2"; fi; }
 KERNEL_M2="$M2/gov/tak/kernel"
 TRANS="$G1/transplants"
-CP="$(jar "$KERNEL_M2/takkernel-engine/$VER/takkernel-engine-$VER.jar" "$TRANS/takkernel-engine-$VER.jar")"
+# G2.4b: the engine's GDAL classes (GdalLibrary, GdalDatasetProjection2 —
+# shadowed under engine-shadows/ for trap #48) import org.gdal. `make
+# gdal-java` stages the bindings built against the libgdal the engine links;
+# libgdalalljni lives beside the jar — callers add $GDAL_JAVA to
+# java.library.path. gdal.jar goes FIRST: android-port-3.1.0.jar carries a
+# GDAL 2.4-era org.gdal.* (66 classes, SWIG JNI stubs) that would otherwise
+# win class resolution — no OAMS_* constants at compile time, and a gdalJNI
+# whose native signatures do not match our libgdalalljni at run time
+# (trap #49).
+GDAL_JAVA="${MACTAK_GDAL_JAVA_DIST:-$G2/gdal-java-dist}"
+[[ -f "$GDAL_JAVA/gdal.jar" && -f "$GDAL_JAVA/libgdalalljni.dylib" ]] \
+  || { echo "render/env.sh: GDAL Java bindings missing in $GDAL_JAVA — run: make gdal-java" >&2; exit 2; }
+GDAL_JAVA="$(cd "$GDAL_JAVA" && pwd)"
+CP="$GDAL_JAVA/gdal.jar"
+CP="$CP:$(jar "$KERNEL_M2/takkernel-engine/$VER/takkernel-engine-$VER.jar" "$TRANS/takkernel-engine-$VER.jar")"
 CP="$CP:$(jar "$KERNEL_M2/takkernel-port/$VER/takkernel-port-$VER.jar" "$TRANS/takkernel-port-$VER.jar")"
 CP="$CP:$(jar "$KERNEL_M2/takkernel-annotation/$VER/takkernel-annotation-$VER.jar" "$TRANS/takkernel-annotation-$VER.jar")"
 CP="$CP:$(jar "$M2/gov/tak/support/android-port/3.1.0/android-port-3.1.0.jar" "$ROOT/dev/spike/g0/transplants/android-port-3.1.0.jar")"

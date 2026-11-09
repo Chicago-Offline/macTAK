@@ -232,11 +232,12 @@ if(TARGET takengine)
     set(takenginejni_SRCS ${takenginejni_COMMON_SRCS} ${takenginejni_MACOS_SRCS})
     set(_jni_kept)
     foreach(_s IN LISTS takenginejni_SRCS)
-        # c3dt: 3D tiles/GLTF rung. vsi_jfile + its JNI wrapper: GDAL
-        # VSI API drift (same drift family as the LAS exclusion above —
-        # overrides pre-drift VSIFilesystemHandler signatures; revisit
-        # with the ttp-dist rung).
-        if(NOT _s MATCHES "/c3dt/|vsi_jfile\\.cpp|jvsijfilefilesystemhandler\\.cpp")
+        # c3dt: 3D tiles/GLTF rung. vsi_jfile.cpp rejoined 2026-11-09
+        # (G2.4 b.1a): dev/g1/patches/vsi-jfile-gdal3-api.patch ports its
+        # VSIFilesystemHandler/VSIVirtualHandle overrides to GDAL 3's
+        # signatures, so GdalLibrary.init() can install the /vsijfile/
+        # handler and complete (trap #50).
+        if(NOT _s MATCHES "/c3dt/")
             list(APPEND _jni_kept ${_s})
         endif()
     endforeach()

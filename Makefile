@@ -1,4 +1,4 @@
-.PHONY: help hooks build build-angle angle gen-gles-shim check-gen-gles-shim check-engine-shadows test test-jni test-roundtrip test-render test-render-resize build-window-host test-render-window smoke-window lint clean
+.PHONY: help hooks build build-angle angle gdal-java test-gdal-projection gen-gles-shim check-gen-gles-shim check-engine-shadows test test-jni test-roundtrip test-render test-render-resize build-window-host test-render-window smoke-window lint clean
 
 # The android.opengl.GLES20/30 runtime is GENERATED (dev/g2/gen-gles-shim.py):
 # two Java classes, the JNI bodies and the stub-mode libGLESv2. Edit the
@@ -13,10 +13,13 @@ GLES_SHIM_OUT   := dev/g2/render/src/android/opengl/GLES20.java dev/g2/render/sr
 # because a dev/g1/patches/*.patch hunk touches them: each shadow must be
 # byte-identical to upstream src/ with the named patch applied (the patch is
 # the single source of the change; the shadow is how CI's jar-only JVM sees
-# it). Pairs of <engine-java-relative-path>=<patch file>.
+# it). Pairs of <engine-java-relative-path>=<patch file>; one patch may span
+# several files (list each file with the same patch).
 ENGINE_SHADOW_SRC := src/takkernel/engine/src/main/java
 ENGINE_SHADOW_DST := dev/g2/render/engine-shadows
-ENGINE_SHADOWS    := com/atakmap/map/layer/raster/tilereader/opengl/GLQuadTileNode4.java=dev/g1/patches/quadtilenode4-resolvetexture-program-bind.patch
+ENGINE_SHADOWS    := com/atakmap/map/layer/raster/tilereader/opengl/GLQuadTileNode4.java=dev/g1/patches/quadtilenode4-resolvetexture-program-bind.patch \
+                     com/atakmap/map/gdal/GdalLibrary.java=dev/g1/patches/gdal3-axis-order-traditional-gis.patch \
+                     com/atakmap/map/layer/raster/gdal/GdalDatasetProjection2.java=dev/g1/patches/gdal3-axis-order-traditional-gis.patch
 
 help:
 	@echo "Targets:"
@@ -24,6 +27,8 @@ help:
 	@echo "  build          - build native + commo (dev/g1/build-native.sh, dev/g1/build-commo.sh)"
 	@echo "  angle          - stage ANGLE (EGL/GLES on Metal) into dev/g2/angle-dist (dev/g2/fetch-angle.sh)"
 	@echo "  build-angle    - build native with ANGLE in the GLES slot (MACTAK_GLES=angle) + commo"
+	@echo "  gdal-java      - G2.4b: build the GDAL SWIG Java bindings (org.gdal) against Homebrew libgdal into dev/g2/gdal-java-dist + smoke (dev/g2/fetch-gdal-java.sh)"
+	@echo "  test-gdal-projection - G2.4 b.2: the engine's GdalLibrary.init + GdalDatasetProjection2 on GDAL 3 with the axis-order patch (needs build-angle + gdal-java)"
 	@echo "  gen-gles-shim  - regenerate the android.opengl GLES shim (Java + JNI + stub) from the transplant jar x gl3.h"
 	@echo "  check-gen-gles-shim - regenerate and fail if the committed shim files differ (CI drift gate)"
 	@echo "  check-engine-shadows - fail if a shadowed engine Java class differs from upstream src/ + its dev/g1/patches hunk (CI drift gate)"
@@ -50,6 +55,12 @@ angle:
 build-angle: angle
 	MACTAK_GLES=angle bash dev/g1/build-native.sh && bash dev/g1/build-commo.sh
 
+gdal-java:
+	bash dev/g2/fetch-gdal-java.sh && bash dev/g2/smoke/run-gdal-java.sh
+
+test-gdal-projection:
+	bash dev/g2/render/run-gdal-projection.sh
+
 gen-gles-shim:
 	python3 $(GLES_SHIM_GEN) $(GLES_SHIM_JAR) $(GLES_SHIM_GL3H) dev/g2/render/src/android/opengl \
 		dev/g2/jni-extra/mactak_gles.c dev/g2/jni-extra/mactak_gles_stub.c
@@ -70,9 +81,14 @@ check-engine-shadows:
 	@[ -d $(ENGINE_SHADOW_SRC) ] || { echo "[check-engine-shadows] SKIP: $(ENGINE_SHADOW_SRC) not present (upstream src/ not checked out)"; exit 0; }; \
 	tmp=$$(mktemp -d) && ok=1; \
 	for pair in $(ENGINE_SHADOWS); do \
+		rel=$${pair%%=*}; \
+		mkdir -p "$$tmp/java/$$(dirname $$rel)" && cp "$(ENGINE_SHADOW_SRC)/$$rel" "$$tmp/java/$$rel"; \
+	done; \
+	for p in $$(for pair in $(ENGINE_SHADOWS); do echo "$${pair#*=}"; done | sort -u); do \
+		patch --forward --silent -p3 -d "$$tmp" < "$$p" || { echo "[check-engine-shadows] $$p does not apply to upstream"; ok=0; }; \
+	done; \
+	for pair in $(ENGINE_SHADOWS); do \
 		rel=$${pair%%=*}; p=$${pair#*=}; \
-		mkdir -p "$$tmp/java/$$(dirname $$rel)" && cp "$(ENGINE_SHADOW_SRC)/$$rel" "$$tmp/java/$$rel" && \
-		patch --forward --silent -p3 -d "$$tmp" < "$$p" || { echo "[check-engine-shadows] $$p does not apply to upstream $$rel"; ok=0; continue; }; \
 		cmp -s "$$tmp/java/$$rel" "$(ENGINE_SHADOW_DST)/$$rel" \
 			|| { echo "[check-engine-shadows] DRIFT: $(ENGINE_SHADOW_DST)/$$rel != upstream + $$p"; ok=0; }; \
 	done; \

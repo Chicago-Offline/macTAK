@@ -36,6 +36,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   staging trees from the repo alone (pristine + gdal-drift + committed
   patches). Validated by byte-rebuild: both trees and every regenerated
   patch come back byte-identical (`dev/g1/tools/README.md`).
+- G2.4 b.0 — the `org.gdal` Java bindings (trap 17): `make gdal-java`
+  (`dev/g2/fetch-gdal-java.sh`) generates the GDAL SWIG Java bindings from
+  the sha256-pinned OSGeo release tarball matching `gdal-config --version`
+  and links `libgdalalljni.dylib` against the same Homebrew `libgdal` the
+  engine dylib links (install names asserted equal — one GDAL instance in
+  the process); `gdal.jar` via `javac -source 8`, adhoc-signed,
+  `PROVENANCE.txt`. `smoke/GdalJavaSmoke` proves load + version match,
+  GTiff create/write/reopen/read, and records the GDAL 3 axis-order
+  verdict for the engine's `SpatialReference` construction (trap #48,
+  `dev/g2/NOTES.md` §G2.4b): it flips — `GdalLibrary` needs
+  `OAMS_TRADITIONAL_GIS_ORDER` (b.2). Runs in CI's `render-angle` job;
+  Brewfile + lock gain `swig`.
+- G2.4 b.2 — `make test-gdal-projection` (`dev/g2/render/run-gdal-projection.sh`,
+  `GdalProjectionSmoke`): the engine's own `GdalLibrary.init()` +
+  `GdalDatasetProjection2.getInstance` on a GeoTIFF, GDAL 3, with the
+  axis-order patch in effect; pixel ↔ ground round-trips exactly. CI
+  `render-angle` runs it after `gdal-java`. `make check-engine-shadows`
+  now handles one patch spanning several shadows.
 - G1.9 JNI guard/behavior canary (`dev/g1/jni-tests/`; canary 3/4 of
   `make build`, standalone via `make test-jni`): the wave-5/6 JNI
   hygiene guards run against a real desktop JVM instead of static
@@ -50,6 +68,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- GDAL 3 axis order (trap #48): `GdalLibrary.EPSG_4326` and every dataset
+  SRS `GdalDatasetProjection2` transforms through are pinned to
+  `OAMS_TRADITIONAL_GIS_ORDER` via a new `GdalLibrary.traditionalGisOrder`
+  helper, so the engine's `TransformPoint(lon, lat)` calls (written for
+  GDAL 2.x) georeference correctly on GDAL ≥ 3; previously
+  `(Infinity, Infinity)`. Engine Java patch + shadows
+  (`dev/g1/patches/gdal3-axis-order-traditional-gis.patch`). Also: the
+  render classpath puts `gdal.jar` ahead of `android-port-3.1.0.jar`, whose
+  GDAL 2.4-era `org.gdal` copy was the real source of trap 17's
+  `UnsatisfiedLinkError` (trap #49); `GdalLibrary.init()` still stopped at
+  the excluded VSI filesystem-handler native (trap #50) until the next entry.
+- `GdalLibrary.init()` completes on GDAL 3 (trap #50): `jni/vsi_jfile.cpp`
+  rejoins the JNI glue via `dev/g1/patches/vsi-jfile-gdal3-api.patch`, which
+  ports its `VSIFilesystemHandler`/`VSIVirtualHandle` overrides to GDAL 3's
+  interface (`Open` → `VSIVirtualHandleUniquePtr` + options, byte-count
+  `Read`/`Write`, new `ClearErr`/`Error`, `shared_ptr` `InstallHandler`).
+  The `/vsitakio/` Java-backed virtual filesystem is installed again;
+  `GdalProjectionSmoke` asserts `init() == true` and opens a GeoTIFF through
+  it (G2.4 b.1a).
 - JNI layer bridge: a Java exception thrown inside a `GLLayer3` callback no
   longer poisons the render thread. `ManagedGLLayer2` now reports (once) and
   clears exceptions thrown by `getSubject()`, `draw()`, `release()`,

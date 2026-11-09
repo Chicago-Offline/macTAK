@@ -177,7 +177,7 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: '1'
         run: >
           brew install cmake rsync proj geos gdal libspatialite minizip nlohmann-json laszip googletest libxml2
-          openssl@3 protobuf libmicrohttpd curl
+          openssl@3 protobuf libmicrohttpd curl swig
 
       - name: Set up Zulu 8 (arm64)
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
@@ -218,6 +218,16 @@ jobs:
         id: build-commo
         if: needs.changes.outputs.changed == 'true'
         run: bash dev/g1/build-commo.sh
+
+      - name: GDAL Java bindings (org.gdal against Homebrew libgdal) + smoke
+        # G2.4b: the engine's raster path binds org.gdal (trap 17); the SWIG
+        # bindings are generated from the sha256-pinned release tarball of the
+        # *installed* GDAL and linked against the same libgdal the engine
+        # dylib links (the script asserts the install names match). The smoke
+        # proves load + GTiff round-trip and records the GDAL 3 axis-order
+        # verdict for the engine's SpatialReference construction.
+        if: needs.changes.outputs.changed == 'true'
+        run: make gdal-java
 
       - name: GLMapView → EGL pbuffer render smoke (no layers)
         if: needs.changes.outputs.changed == 'true'

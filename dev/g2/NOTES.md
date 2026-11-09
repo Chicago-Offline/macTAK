@@ -249,7 +249,11 @@ is ordered roughly by when it bites.
     `glVertexAttribPointer` (trap 12's pattern, already redirected in the
     shim) — patch when the native line renderer is on the path.
   Real imagery also re-opens trap 17 (the `org.gdal` JNI for
-  `GdalTileReader` once a GeoTIFF raster is on the path).
+  `GdalTileReader` once a GeoTIFF raster is on the path) — **b.0 done
+  2026-11-08**: `make gdal-java` builds the bindings against Homebrew's
+  libgdal and the smoke proves load + GTiff round-trip; it also answered
+  the GDAL 3 axis-order question before any render depended on it (trap
+  #48, "G2.4b" below).
 - **Shim/tooling debt (issue #19):** landed in PR #21 — a `make
   gen-gles-shim` target plus a `make check-gen-gles-shim` CI drift gate so
   the four GENERATED artifacts can't drift from the generator; cache
@@ -828,3 +832,83 @@ captured reassigned locals (`layers`/`basemaps` null-defaulting) — now
 build-shell` only — clang/swiftc, no engine, no GUI session. The run gate
 stays `make test-shell` on the dev Mac, unchanged from the M3.0 decision
 (CI has no WindowServer session). Roadmap flips M3.2 → DONE at merge.
+
+## G2.4b — real imagery, step b.0: the `org.gdal` bindings exist (2026-11-08)
+
+G2.4's headline is the first non-synthetic raster through the engine, and
+its one hard prerequisite is trap 17: `GdalTileReader`, `GdalLayerInfo`,
+`GdalDatasetProjection2` and 19 other engine classes bind the GDAL SWIG
+Java bindings (`org.gdal.*` → `gdal.jar` + `libgdalalljni`), which the
+transplant jar does not ship, Homebrew `gdal` does not build, and
+upstream builds from its own gdal-2.4.4-mod tree
+(`takthirdparty/mk/gdal.mk`). Step b.0 de-risks that alone, before any
+rendering depends on it.
+
+```sh
+make gdal-java        # dev/g2/fetch-gdal-java.sh → dev/g2/gdal-java-dist/{gdal.jar,libgdalalljni.dylib,PROVENANCE.txt}; then smoke/run-gdal-java.sh
+```
+
+### What the script does, and why that way
+
+- **The bindings must match the installed GDAL, not upstream's.** The
+  engine dylib already links Homebrew `libgdal.39` (G0's R3 fallback), so
+  wrappers generated from the gdal-2.4.4 interfaces would be the wrong
+  ABI. `fetch-gdal-java.sh` reads `gdal-config --version` (3.13.3 today),
+  downloads the OSGeo release tarball of **that** version (sha256-pinned
+  per version; an unpinned version is a loud FATAL, by design — a Homebrew
+  gdal bump already fails the `Brewfile.lock.json` freshness gate, so the
+  pin lands in the same PR as the lock), extracts only `swig/include` +
+  `ogr/ogr_srs_api.h` (`osr.i` `%include`s it by relative path), and runs
+  the five `swig -java` invocations exactly as GDAL's own
+  `swig/java/CMakeLists.txt` does (`-Wall -package org.gdal.<pkg>`;
+  `gdalconst` is C, the rest C++; `gnm` included because Homebrew's build
+  exports GNM).
+- **One libgdal in the process.** The wrappers compile against
+  `gdal-config --cflags` and link `gdal-config --libs`; the script asserts
+  the engine dylib's `libgdal` install name equals Homebrew's before it
+  builds, so `GdalTileReader` (via `org.gdal`) and the engine's native
+  `GdalLibrary::init` share one driver registry. 2223 `Java_org_gdal_*`
+  exports; `-fno-strict-aliasing` as GDAL requires for SWIG's upcasts.
+- **No ant/maven/cmake.** GDAL's build uses ant only to jar and publish;
+  here `javac -source 8` + `jar cfm` produce `gdal.jar` (98 classes) with
+  the version in the manifest. Output is adhoc-signed with stderr kept
+  (fetch-angle's codesign lesson), `PROVENANCE.txt` records gdal/swig/jdk
+  versions, the tarball URL + sha256 and both artifact sha256s. The build
+  is reproducible: two runs gave identical `libgdalalljni.dylib` hashes.
+
+### The smoke (`smoke/GdalJavaSmoke.java`) — three proofs, quoted
+
+```text
+gdal-java-smoke: org.gdal loaded, GDAL 3.13.3 (213 drivers)
+gdal-java-smoke: GTiff round-trip OK 64x64 gt[0]=-122.5 gt[3]=37.8 srs=EPSG:4326
+ERROR 1: PROJ: webmerc: Invalid latitude
+gdal-java-smoke: axis-order as-engine (ImportFromEPSG(4326), TransformPoint(lon,lat)): strategy=1 → (Infinity, Infinity) != expected (lat,lon authority order)
+gdal-java-smoke: axis-order with OAMS_TRADITIONAL_GIS_ORDER: → (-13625506, 4537132) = expected
+gdal-java-smoke: axis-order verdict: engine construction FLIPS axes on this GDAL — GdalLibrary needs OAMS_TRADITIONAL_GIS_ORDER (G2.4 b.2)
+gdal-java-smoke: PASS
+```
+
+1. `gdal.VersionInfo("RELEASE_NAME")` must equal `gdal-config --version`
+   — the JNI library loaded Homebrew's libgdal, not some other copy.
+2. GTiff create → write → reopen → read through `org.gdal` with
+   geotransform, EPSG:4326 WKT and pixel values intact.
+3. The b.2 question, answered on evidence (trap #48 below). The smoke
+   *records* the verdict and FAILs only if even the corrected form is
+   wrong (that would mean PROJ data is missing).
+
+### Traps found on the way (#48)
+
+| trap | what it is / what now guards it |
+|------|---------------------------------|
+| #48 | **GDAL 3 honours EPSG axis order; the engine assumes GDAL 2's lon,lat.** `GdalLibrary.initImpl` builds `EPSG_4326 = new SpatialReference(); ImportFromEPSG(4326)` with no `SetAxisMappingStrategy`, and `GdalDatasetProjection2` feeds it `TransformPoint(lon, lat)`. On GDAL ≥ 3.0 (PROJ 6+) that SRS is lat,lon by authority order: the smoke's `-122.4, 37.7` is read as latitude −122.4 → PROJ "Invalid latitude" → `(Infinity, Infinity)`. With `OAMS_TRADITIONAL_GIS_ORDER` on both SRSes the same call gives the correct Web-Mercator metres. **Guard today:** the smoke prints the verdict every run, so a GDAL that changes behaviour is noticed. **Fix (b.2, next):** an engine Java patch + shadow (the #53 mechanism) setting `OAMS_TRADITIONAL_GIS_ORDER` on `EPSG_4326` and on every dataset SRS `GdalDatasetProjection2`/`GdalLayerInfo` construct — upstream's Android build never saw this because its GDAL is 2.4.4. Until b.2 lands, any GDAL-backed raster would georeference into the wrong hemisphere or not at all. |
+
+### Gates and provenance
+
+`make gdal-java` PASS (b.0's only gate; also runs in CI's `render-angle`
+job after the engine build so the install-name cross-check is live);
+`shellcheck` on both scripts; `javac -Xlint:all -Werror` on the smoke;
+Brewfile + lock gain `swig` (4.5.1) with the `render-angle` brew line, so
+the supply-chain union check stays equal. Nothing in the render path
+changes yet: `RenderSmoke` still unregisters `GdalTileReader.SPI`; b.1
+(GeoTIFF fixture through `GdalTileReader` → `GLQuadTileNode4`) is where
+that flips, after b.2's axis fix.

@@ -759,3 +759,82 @@ MBTiles basemap), `make test-render-window` PASS (bare + layer,
 `glErrors=0`). The patch verifier replays gdal-drift + the 18 committed
 patches + the 11 wave-6 patches onto a pristine engine copy in glob
 order and asserts the JNI tree equals the edited tree byte-for-byte.
+
+## G1.9 — the JNI guards on a real desktop JVM (`make test-jni`, canary 3/4)
+
+Waves 4–6 verified the JNI hygiene work statically (audits, patch
+replay, byte-compare). G1.9 points GTest at a live desktop JVM so the
+guards are exercised, not just read: `dev/g1/jni-tests/` compiles four
+test TUs into TWO products (both staged to `native-dist/` by
+`build-native.sh`, whose canary list grew 2→4):
+
+- **Guards mode** — the standalone binary boots a JVM in-process from
+  `libjli` (`jni_test_env.hpp`, probe order from `jni_boot.c`) with an
+  EMPTY classpath (`run.sh` enforces `env -u`). 7 pins: the wave-5/6
+  class-init guards bail neutrally on the missing classes
+  (createTextFormat→TE_Err, its 8 consumers→0/0.f, loadGlyph→TE_Err,
+  Matrix/Rect interop marshal→TE_IllegalState) and `JNI_OnLoad` fails
+  with `JNI_ERR` leaving a pristine JNIEnv instead of dying on a
+  pending exception.
+- **Kernel mode** — the same TUs as a shared library
+  (`libtakengine-jni-tests.dylib`) loaded by `JniTestsMain` UNDER THE
+  JAVA LAUNCHER, with the takkernel jars (mavenLocal-else-committed,
+  the smoke's rule). JNI_OnLoad runs in the healthy launcher context,
+  then 6 pins drive the Java-backed IOProviderFactory proxy over real
+  files: getFileCount directory=2 / file=1 / missing=TE_InvalidArg,
+  createTempFile on a bad dir→TE_Err, delete of a missing path→TE_Err,
+  DatabaseFactory_create on a bad URI→TE_Err — the last two asserting a
+  pristine JNIEnv after the failure (the wave-5 ExceptionClear guard).
+
+Desktop-reachable vs deferred/audit-only: the guards suite covers every
+class-init failure reachable with an empty classpath (interop/render
+text + marshal + onload families); guards whose lookups only fail on
+Android (GL surface/listener classes the desktop jars always provide)
+stay audit-covered from waves 5/6 and are not desktop-reachable; the
+IOProviderFactory family is the one branch a desktop JVM can exercise
+with real Java behavior, which is what kernel mode pins. `run.sh`
+exits 0 without a JDK 8 (the native build itself needs none); CI's
+native job installs Zulu 8 first and uploads
+`takengine-jni-guards.xml` + `takengine-jni-kernel.xml`.
+
+Traps found on the way (do not rediscover these):
+
+- **Kernel mode must run under the launcher, not a raw in-process
+  boot.** On Zulu 8 aarch64, when the VM itself invokes `JNI_OnLoad`
+  (`System.load`), the first `ATAKMapEngineJNI_findClass` call dies
+  inside hotspot's `jni_FindClass` — `java_lang_Class::as_Klass(NULL)`
+  at `common.cpp` 157 (hs_err + `atos` on the staged dylib). The SAME
+  boot is fine when our own code calls `JNI_OnLoad` via dlsym (guards
+  mode does exactly that), and the same library is clean under the
+  `java` launcher — the smoke's boot. Hence the shared-library suite:
+  `JniTestsMain` (Java) System.loads core + glue (JNI_OnLoad runs
+  there) + the tests dylib, then hands gtest argv to
+  `Java_JniTestsMain_takengineJniTestsMain` (module_main.cpp), which
+  stashes the JNIEnv for the fixture (`takengine_jni_tests_env` —
+  linked into both products; ld64 refuses undefined weak imports in
+  executables). `-Djava.library.path` via `JNI_CreateJavaVM` also
+  proved unreliable (searched but not honored) — moot under the
+  launcher, which sets it normally.
+- **`FindClass("com/atakmap/map/EngineLibrary")` fails by design on
+  this classpath** — its verification resolves
+  `new BouncyCastleProvider` and the smoke's jar set carries no bcprov;
+  the NULL is tolerated (`ClassLoader_class.library` stays NULL, the
+  findClass classloader fallback skips it), which is exactly what the
+  guards-mode onload pin asserts. See §G1.8's trap: no early-return
+  guard, no extra jars.
+- **`IOProviderFactoryProxy::listFiles` dropped every child** —
+  `STLVectorAdapter contents_w;` default-constructs the adapter onto
+  its own private store; the java `list(File)` call returned correctly
+  (instrumented: absPath right, array len=2) but the caller's vector
+  stayed empty, so `getFileCount(dir)` reported `TE_Ok`/0 and
+  `length(dir)` 0. Fixed by
+  `patches/ioproviderfactory-listfiles-adapter-bind.patch` — both call
+  sites (getFileCount's dir branch AND length's, same latent bug) now
+  bind `contents_w(contents)`. The pin caught it as designed: kernel
+  3/6 on the first healthy-boot run, 6/6 after.
+- The JNI export must be `extern "C"` — without it `System.load`
+  succeeds but the first native call throws UnsatisfiedLinkError.
+
+Evidence: `make build` PASS — canaries 4/4 (dlopen; engine 33/33;
+jni-tests guards 7/7 + kernel 6/6; JVM in-process smoke) + commo
+smoke; `make lint` PASS (0 issues).

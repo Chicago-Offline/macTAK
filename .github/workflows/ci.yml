@@ -145,6 +145,8 @@ jobs:
             dev/g1/native-dist/libtakenginejni.dylib
             dev/g1/native-dist/libGLESv2-stub.dylib
             dev/g1/native-dist/takengine-tests.xml
+            dev/g1/native-dist/takengine-jni-guards.xml
+            dev/g1/native-dist/takengine-jni-kernel.xml
           if-no-files-found: error
 
   render-angle:

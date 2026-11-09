@@ -1,4 +1,4 @@
-.PHONY: help hooks build build-angle angle gen-gles-shim check-gen-gles-shim check-engine-shadows test test-roundtrip test-render test-render-resize build-window-host test-render-window smoke-window lint clean
+.PHONY: help hooks build build-angle angle gen-gles-shim check-gen-gles-shim check-engine-shadows test test-jni test-roundtrip test-render test-render-resize build-window-host test-render-window smoke-window lint clean
 
 # The android.opengl.GLES20/30 runtime is GENERATED (dev/g2/gen-gles-shim.py):
 # two Java classes, the JNI bodies and the stub-mode libGLESv2. Edit the
@@ -28,6 +28,7 @@ help:
 	@echo "  check-gen-gles-shim - regenerate and fail if the committed shim files differ (CI drift gate)"
 	@echo "  check-engine-shadows - fail if a shadowed engine Java class differs from upstream src/ + its dev/g1/patches hunk (CI drift gate)"
 	@echo "  test           - run smoke tests (dev/g1/smoke/run.sh)"
+	@echo "  test-jni       - G1.9 JNI guard/behavior unit canary on a real desktop JVM: guards mode (class-init bailouts, clean JNI_ERR) + kernel mode (Java-backed IOProviderFactory on real files) (dev/g1/jni-tests/run.sh; skips without a JDK)"
 	@echo "  test-roundtrip - run headless round-trip tests (dev/g1/headless/run.sh)"
 	@echo "  test-render    - G2 render smoke: engine GLGlobe into an EGL pbuffer on ANGLE, bare + GeoJSON layer + MBTiles basemap (dev/g2/render/run.sh)"
 	@echo "  test-render-resize - M3.1 dynamic-size exercise: --resize mid-run, bare + GeoJSON layer (surface OnSizeChangedListeners must fire)"
@@ -81,6 +82,14 @@ check-engine-shadows:
 
 test:
 	bash dev/g1/smoke/run.sh
+
+# G1.9: the JNI guard/behavior canary built by `make build`, run against
+# the staged dylibs. Boots the desktop JVM twice — guards mode (empty
+# classpath: class-init failures must bail neutrally, JNI_OnLoad must fail
+# cleanly) and kernel mode (takkernel jars: the Java-backed IOProviderFactory
+# proxy on real files). Skips when no JDK 8 is present.
+test-jni:
+	bash dev/g1/jni-tests/run.sh
 
 test-roundtrip:
 	bash dev/g1/headless/run.sh

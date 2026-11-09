@@ -36,6 +36,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   staging trees from the repo alone (pristine + gdal-drift + committed
   patches). Validated by byte-rebuild: both trees and every regenerated
   patch come back byte-identical (`dev/g1/tools/README.md`).
+- G1.9 JNI guard/behavior canary (`dev/g1/jni-tests/`; canary 3/4 of
+  `make build`, standalone via `make test-jni`): the wave-5/6 JNI
+  hygiene guards run against a real desktop JVM instead of static
+  verification. Guards mode boots a JVM in-process from `libjli` with
+  an empty classpath — every class-init failure must bail neutrally
+  (TE_Err / 0 / 0.f, pristine JNIEnv) and `JNI_OnLoad` must fail with
+  `JNI_ERR`, not crash (7 pins). Kernel mode runs the Java-backed
+  `IOProviderFactory` proxy under the `java` launcher over the takkernel
+  jars — real files through the fixed proxy (6 pins). Skips (exit 0)
+  without a JDK 8; CI's native job installs Zulu 8 and uploads
+  `takengine-jni-guards.xml` + `takengine-jni-kernel.xml`.
 
 ### Fixed
 
@@ -165,6 +176,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   block); and the F-1 dead `setFocusPointOffset` slot is recorded
   (`MapRenderer3_init` binds it from a nonexistent `isAnimating(FF)V`
   and never consumes it — wave-7 deletes it). No code changes.
+- JNI `IOProviderFactoryProxy::listFiles` (desktop JNI filesystem)
+  dropped every directory entry: the `STLVectorAdapter` was
+  default-constructed instead of bound to the caller's vector, so the
+  Java `IOProviderFactory.list(File)` results (returned correctly) were
+  collected into the adapter's private store and discarded —
+  `getFileCount` on a directory reported `TE_Ok` with 0 and `length`
+  on a directory reported 0. Both call sites now bind
+  (`contents_w(contents)`).
+  (`dev/g1/patches/ioproviderfactory-listfiles-adapter-bind.patch`;
+  caught by the G1.9 kernel-mode pin `GetFileCountOfADirectory`, which
+  failed 0-vs-2 on the first healthy-boot run)
 
 ## [0.3.1] - 2026-11-07 — G2: window surfaces (M3.0–M3.1) + hardening
 

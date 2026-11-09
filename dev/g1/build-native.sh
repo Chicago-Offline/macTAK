@@ -287,6 +287,83 @@ if(TARGET takengine)
         BUILD_RPATH "@loader_path;${CMAKE_BINARY_DIR}/engine-cpp;@GLES_RPATH@"
     )
 endif()
+
+    get_target_property(_jniincs takenginejni INCLUDE_DIRECTORIES)
+
+    # ---------------------------------------------------------------
+    # G1.9: JNI guard/behavior canary (dev/g1/jni-tests) — GTest over a
+    # REAL desktop JVM (no fake JNIEnv; the JVM is the failure vector):
+    #   guards mode (empty classpath): wave-5/6 class-init guards bail
+    #     neutrally; JNI_OnLoad fails cleanly (JNI_ERR), not by crash.
+    #   kernel mode (takkernel jars): the Java-backed IOProviderFactory
+    #     proxy behaves on real files (the getFileCount isDirectory fix)
+    #     and Java failures surface as TE_Err with a clean JNIEnv.
+    # Needs no JDK to build — dev/g1/jni-tests/run.sh skips when none is
+    # present (CI's native job installs Zulu 8 before this script).
+    # ---------------------------------------------------------------
+    add_executable(takengine-jni-tests
+        ${SRC}/dev/g1/jni-tests/jni_test_env.hpp
+        ${SRC}/dev/g1/jni-tests/textformat2_guards_test.cpp
+        ${SRC}/dev/g1/jni-tests/interop_guards_test.cpp
+        ${SRC}/dev/g1/jni-tests/onload_guards_test.cpp
+        ${SRC}/dev/g1/jni-tests/ioprovider_kernel_test.cpp
+        # module_main.cpp links into BOTH products (no main() in it): the
+        # binary needs takengine_jni_tests_env's definition too — weak
+        # imports of undefined symbols don't link for executables on ld64
+        ${SRC}/dev/g1/jni-tests/module_main.cpp
+    )
+    target_include_directories(takengine-jni-tests PRIVATE
+        ${_jniincs}
+        /opt/homebrew/include
+    )
+    target_compile_definitions(takengine-jni-tests PRIVATE
+        ${_takdefs}
+    )
+    target_link_directories(takengine-jni-tests PRIVATE /opt/homebrew/lib)
+    target_link_libraries(takengine-jni-tests PRIVATE takenginejni takengine GTest::gtest_main)
+    set_target_properties(takengine-jni-tests PROPERTIES
+        # brew GTest (>=1.16) requires C++17 via its imported-target
+        # compile features — those win over CXX_STANDARD, so the TUs
+        # compile as C++17
+        CXX_STANDARD 17
+        # @loader_path: the binary is staged next to the dylibs in
+        # native-dist (canary 3/4 runs it there, and `make test-jni` too)
+        BUILD_RPATH "@loader_path;@loader_path/engine-cpp;${CMAKE_BINARY_DIR};${CMAKE_BINARY_DIR}/engine-cpp;@GLES_RPATH@"
+    )
+    # the engine codebase is C++14-era: its headers carry throw(X)
+    # dynamic-exception specs, which are an error under C++17. Downgrade
+    # to warning (clang then treats them as noexcept(false)); takenginejni
+    # dodges this only because its TUs compile with the compiler default
+    # (gnu++14) — this target can't, with GTest in the link
+    target_compile_options(takengine-jni-tests PRIVATE -Wno-error=dynamic-exception-spec)
+
+    # kernel mode runs UNDER THE JAVA LAUNCHER (the smoke's proven boot —
+    # a raw JNI_CreateJavaVM boot crashes inside hotspot's jni_FindClass
+    # when IT invokes JNI_OnLoad on Zulu 8 aarch64): the same TUs as a
+    # shared library, loaded by JniTestsMain after the launcher has
+    # System.load'ed the engine dylibs (gtest, NOT gtest_main — the
+    # module's entry is Java_JniTestsMain_takengineJniTestsMain)
+    add_library(takengine-jni-tests-module SHARED
+        ${SRC}/dev/g1/jni-tests/textformat2_guards_test.cpp
+        ${SRC}/dev/g1/jni-tests/interop_guards_test.cpp
+        ${SRC}/dev/g1/jni-tests/onload_guards_test.cpp
+        ${SRC}/dev/g1/jni-tests/ioprovider_kernel_test.cpp
+        ${SRC}/dev/g1/jni-tests/module_main.cpp
+    )
+    target_include_directories(takengine-jni-tests-module PRIVATE
+        ${_jniincs}
+        /opt/homebrew/include
+    )
+    target_compile_definitions(takengine-jni-tests-module PRIVATE
+        ${_takdefs}
+    )
+    target_link_directories(takengine-jni-tests-module PRIVATE /opt/homebrew/lib)
+    target_link_libraries(takengine-jni-tests-module PRIVATE takenginejni takengine GTest::gtest)
+    set_target_properties(takengine-jni-tests-module PROPERTIES
+        CXX_STANDARD 17
+        BUILD_RPATH "@loader_path;@loader_path/engine-cpp;${CMAKE_BINARY_DIR};${CMAKE_BINARY_DIR}/engine-cpp;@GLES_RPATH@"
+    )
+    target_compile_options(takengine-jni-tests-module PRIVATE -Wno-error=dynamic-exception-spec)
 CMAKE
 sed -e "s|@ROOT@|$ROOT|g" -e "s|@WORK@|$WORK|g" \
     -e "s|@GLES_LIB@|$GLES_LIB|g" -e "s|@GLES_RPATH@|$GLES_RPATH|g" \
@@ -304,20 +381,22 @@ log "building libtakengine.dylib + test canary (-j$JOBS, ~4–5 min clean)"
 cmake --build "$WORK/cmake" -- -j"$JOBS"
 
 # --- canary --------------------------------------------------------------
-log "canary 1/2: dlopen"
+log "canary 1/4: dlopen"
 python3 - "$WORK/cmake/engine-cpp/libtakengine.dylib" <<'PY'
 import ctypes, sys
 ctypes.CDLL(sys.argv[1])
 print("[g1] dlopen OK:", sys.argv[1])
 PY
 
-log "canary 2/2: engine C++ tests (GTest)"
+log "canary 2/4: engine C++ tests (GTest)"
 "$WORK/cmake/takengine-tests" --gtest_output=xml:"$OUT/takengine-tests.xml"
 
 # --- stage ---------------------------------------------------------------
 log "staging → $OUT"
 cp "$WORK/cmake/engine-cpp/libtakengine.dylib" "$OUT/"
 cp "$WORK/cmake/libtakenginejni.dylib" "$OUT/"
+cp "$WORK/cmake/takengine-jni-tests" "$OUT/"
+cp "$WORK/cmake/libtakengine-jni-tests-module.dylib" "$OUT/libtakengine-jni-tests.dylib"
 rm -f "$OUT/libGLESv2-stub.dylib" "$OUT/libGLESv2.dylib" "$OUT/libEGL.dylib"
 if [[ "$GLES" == angle ]]; then
   cp "$ANGLE_DIST/libEGL.dylib" "$ANGLE_DIST/libGLESv2.dylib" "$OUT/"   # @loader_path siblings
@@ -328,12 +407,19 @@ fi
 # §M3.1): re-staged linker-signed dylibs were SIGKILLed on dlopen under macOS
 # provenance enforcement while `codesign -v --strict` still passed; a fresh
 # adhoc signature over the staged file fixes it.
-for f in "$OUT"/*.dylib; do
+for f in "$OUT"/*.dylib "$OUT/takengine-jni-tests"; do
   cs_out="$(codesign --force --sign - "$f" 2>&1)" || die "codesign failed on staged $f: $cs_out"
 done
 
 # --- canary --------------------------------------------------------------
-log "canary 3/3: JVM in-process load (JNI glue)"
+# G1.9: the JNI guard/behavior pins ride the same gate — they exercise the
+# staged artifacts (binary + dylibs signed above), in-process on a real
+# desktop JVM. Skips (exit 0) when no JDK is present.
+log "canary 3/4: JNI guard/behavior unit tests (real desktop JVM)"
+bash "$DEV/g1/jni-tests/run.sh" "$OUT"
+
+# --- canary --------------------------------------------------------------
+log "canary 4/4: JVM in-process load (JNI glue)"
 nm -gU "$WORK/cmake/libtakenginejni.dylib" | grep 'Java_com_atakmap_database_impl_DatabaseImpl_openImpl' >/dev/null \
   || die "libtakenginejni.dylib is missing the DatabaseImpl JNI exports"
 nm -gU "$WORK/cmake/libtakenginejni.dylib" | grep 'Java_mactak_headless_NativeGdal_init' >/dev/null \
@@ -348,4 +434,4 @@ file "$OUT/libtakengine.dylib" "$OUT/libtakenginejni.dylib"
 otool -L "$OUT/libtakenginejni.dylib" | sed 's/^/  /'
 ls -lh "$OUT"
 
-log "G1.0/G1.1 OK — dylibs built, canaries green, artifacts in g1/native-dist/"
+log "G1.0/G1.1 OK — dylibs built, canaries green (4/4), artifacts in g1/native-dist/"

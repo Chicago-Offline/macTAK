@@ -21,10 +21,15 @@ import java.io.File;
  * {@code GdalLibrary}/{@code GdalDatasetProjection2} are the ones under test.
  *
  * Proves: (1) {@code GdalLibrary.init()} — the real engine init, natives
- * loaded — leaves {@code EPSG_4326} in traditional GIS order; (2)
+ * loaded, the {@code /vsitakio/} handler installed — returns true and leaves
+ * {@code EPSG_4326} in traditional GIS order; (2)
  * {@code GdalDatasetProjection2.getInstance(dataset)} on a 64×64 EPSG:4326
  * GeoTIFF maps pixel (0,0) to its georeferenced corner and back. Without the
- * patch (2) yields Infinity/NaN ("PROJ: Invalid latitude").
+ * patch (2) yields Infinity/NaN ("PROJ: Invalid latitude"); (3) the same
+ * GeoTIFF opens through the Java-backed VSI handler ({@code /vsitakio/}
+ * prefix → {@code VSIFileFileSystemHandler} → {@code FileChannel}) with the
+ * same geotransform — the b.1a port of {@code vsi_jfile.cpp} to GDAL 3's
+ * VSI interface (trap #50).
  *
  * Exit 0 = PASS; exit 1 with the first failing line otherwise.
  */
@@ -52,16 +57,12 @@ public final class GdalProjectionSmoke {
         }
         check(scratch != null && scratch.isDirectory(), "--scratch DIR required");
 
-        // 1. the engine's init, for real. installFilesystemHandler's native
-        //    is not in the JNI glue yet (vsi_jfile.cpp excluded for GDAL VSI
-        //    API drift — b.1's job), so init() may throw past EPSG_4326's
-        //    construction; the assertion below is on the patched line that
-        //    runs before it.
-        try {
-            GdalLibrary.init();
-        } catch (UnsatisfiedLinkError e) {
-            System.out.println("gdal-projection-smoke: GdalLibrary.init() stopped at a missing native (expected until b.1): " + e.getMessage());
-        }
+        // 1. the engine's init, for real: AllRegister, config, EPSG_4326,
+        //    registerProjectionSpi (JNI), the /vsitakio/ VSI handler (JNI,
+        //    vsi_jfile.cpp — b.1a). Anything short of true is a FAIL.
+        final boolean inited = GdalLibrary.init();
+        System.out.println("gdal-projection-smoke: GdalLibrary.init() = " + inited);
+        check(inited, "GdalLibrary.init() returned false");
         check(GdalLibrary.EPSG_4326 != null, "GdalLibrary.EPSG_4326 not constructed");
         final int strategy = GdalLibrary.EPSG_4326.GetAxisMappingStrategy();
         System.out.println("gdal-projection-smoke: GdalLibrary.EPSG_4326 axis mapping strategy=" + strategy
@@ -106,6 +107,23 @@ public final class GdalProjectionSmoke {
         check(Math.abs(p.x - 32) < 1e-6 && Math.abs(p.y - 32) < 1e-6, "ground(centre) != image(32,32)");
 
         ds.delete();
+
+        // 3. the same file through the Java-backed VSI handler: GDAL calls
+        //    VSIJFileFilesystemHandler::Open/Stat and VSIJFileHandle::Seek/
+        //    Read/Tell/Eof (the ported overrides) against a FileChannel.
+        final String vsiPath = com.atakmap.map.gdal.VSIFileFileSystemHandler.PREFIX + tif.getPath();
+        final Dataset vds = gdal.Open(vsiPath, gdalconstConstants.GA_ReadOnly);
+        check(vds != null, "open via " + com.atakmap.map.gdal.VSIFileFileSystemHandler.PREFIX + " failed: " + gdal.GetLastErrorMsg());
+        final double[] vgt = vds.GetGeoTransform();
+        System.out.println(String.format("gdal-projection-smoke: %s open OK %dx%d gt[0]=%.4f gt[3]=%.4f driver=%s",
+                com.atakmap.map.gdal.VSIFileFileSystemHandler.PREFIX, vds.getRasterXSize(), vds.getRasterYSize(),
+                vgt[0], vgt[3], vds.GetDriver().getShortName()));
+        check(vds.getRasterXSize() == w && vds.getRasterYSize() == h, "vsi size mismatch");
+        check(Math.abs(vgt[0] - west) < 1e-9 && Math.abs(vgt[3] - north) < 1e-9, "vsi geotransform mismatch");
+        final byte[] vpx = new byte[w * h];
+        check(vds.GetRasterBand(1).ReadRaster(0, 0, w, h, gdalconstConstants.GDT_Byte, vpx) == 0,
+                "vsi ReadRaster failed: " + gdal.GetLastErrorMsg());
+        vds.delete();
         System.out.println("gdal-projection-smoke: PASS");
     }
 }

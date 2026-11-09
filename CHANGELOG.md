@@ -24,6 +24,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `render/env.sh` with the render smoke so both build the same classes.
 - CI: `shell-compile` job (macos-26, Zulu 8 headers) compiles the shell;
   the run stays a dev-Mac gate like M3.0's smoke-window split.
+- Wave 5/6 reference tooling (`dev/g1/tools/wave5/`, `dev/g1/tools/wave6/`;
+  not a CI gate): the audit and patch-generation/verification scripts
+  behind the two JNI hygiene waves, parameterized off their `/tmp` scratch
+  paths (`G1_REPO`, `G1_STAGING`) so a fresh clone plus the pinned `src/`
+  tree (CONTRIBUTING.md) reproduces them — the wave-5 roster audit
+  (`audit_roster.py`, `residuals.py`), patch regeneration + replay
+  verification (each wave's `gen_patches.py`), the wave-6 class-init audit
+  (`class_init_audit.py`) and guard-sweep editors (`guard_inits.py`,
+  `fix_inline.py`), and `stage_baseline.py`, which rebuilds both wave-6
+  staging trees from the repo alone (pristine + gdal-drift + committed
+  patches). Validated by byte-rebuild: both trees and every regenerated
+  patch come back byte-identical (`dev/g1/tools/README.md`).
 
 ### Fixed
 

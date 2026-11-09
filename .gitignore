@@ -16,3 +16,7 @@
 
 # G1 probe/build logs (diagnostics, not evidence)
 /dev/g1/*.log
+
+# Python bytecode from the dev/g1 tooling
+__pycache__/
+*.pyc

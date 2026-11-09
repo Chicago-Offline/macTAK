@@ -504,7 +504,10 @@ line-by-line verification pass. Patch mechanics as wave 4: scripted edit of
 a pristine tree staged at `/tmp/g1wave5/{a,b}/tmp/takeng-src/`, `diff -u`
 with explicit `a/…`/`b/…` labels, applied by `build-native.sh` at -p3 in
 glob order. The generator/verifier (`gen_patches.py`) and the roster audit
-(`audit_roster.py`) live in `/tmp/g1wave5/`.
+(`audit_roster.py`) are committed as reference tooling under
+`dev/g1/tools/wave5/` — parameterized (`G1_REPO`, `G1_STAGING`) so a fresh
+clone plus the pinned `src/` tree (CONTRIBUTING.md) reproduces them; see
+that directory's README.
 
 Engine fixes (the two wave-4 report-only items, now closed):
 

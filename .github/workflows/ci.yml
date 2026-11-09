@@ -229,6 +229,13 @@ jobs:
         if: needs.changes.outputs.changed == 'true'
         run: make gdal-java
 
+      - name: Engine GDAL georeferencing on GDAL 3 (GdalLibrary.init + GdalDatasetProjection2, axis-order patch)
+        # G2.4 b.2 (trap #48): the shadowed GdalLibrary/GdalDatasetProjection2
+        # pin OAMS_TRADITIONAL_GIS_ORDER; PASS = EPSG_4326 in traditional
+        # order and a GeoTIFF's pixel(0,0) <-> NW corner round-trips exactly.
+        if: needs.changes.outputs.changed == 'true'
+        run: make test-gdal-projection
+
       - name: GLMapView → EGL pbuffer render smoke (no layers)
         if: needs.changes.outputs.changed == 'true'
         env:

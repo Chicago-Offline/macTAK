@@ -839,8 +839,9 @@ G2.4's headline is the first non-synthetic raster through the engine, and
 its one hard prerequisite is trap 17: `GdalTileReader`, `GdalLayerInfo`,
 `GdalDatasetProjection2` and 19 other engine classes bind the GDAL SWIG
 Java bindings (`org.gdal.*` → `gdal.jar` + `libgdalalljni`), which the
-transplant jar does not ship, Homebrew `gdal` does not build, and
-upstream builds from its own gdal-2.4.4-mod tree
+engine transplant jar does not ship (correction, b.2: `android-port-3.1.0.jar`
+*does* carry a GDAL 2.4-era `org.gdal` — trap #49), Homebrew `gdal` does
+not build, and upstream builds from its own gdal-2.4.4-mod tree
 (`takthirdparty/mk/gdal.mk`). Step b.0 de-risks that alone, before any
 rendering depends on it.
 
@@ -912,3 +913,83 @@ the supply-chain union check stays equal. Nothing in the render path
 changes yet: `RenderSmoke` still unregisters `GdalTileReader.SPI`; b.1
 (GeoTIFF fixture through `GdalTileReader` → `GLQuadTileNode4`) is where
 that flips, after b.2's axis fix.
+
+## G2.4b — step b.2: the axis-order fix, as an engine patch (2026-11-09)
+
+Trap #48's fix, shipped the #53 way: one patch,
+`dev/g1/patches/gdal3-axis-order-traditional-gis.patch`, two shadows
+(`engine-shadows/com/atakmap/map/gdal/GdalLibrary.java`,
+`…/layer/raster/gdal/GdalDatasetProjection2.java`), drift-gated.
+
+```sh
+make test-gdal-projection   # render/run-gdal-projection.sh → GdalProjectionSmoke; needs build-angle + gdal-java
+```
+
+### The patch
+
+- `GdalLibrary.traditionalGisOrder(SpatialReference)` — new static helper:
+  `SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER)`, returns the SRS for
+  chaining. The javadoc at the patch site carries the why.
+- `GdalLibrary.initImpl`: `EPSG_4326` gets it right after `ImportFromEPSG`.
+- `GdalDatasetProjection2(SpatialReference)`: the dataset SRS gets it before
+  the two `CoordinateTransformation`s are built — that covers both
+  subclasses (`GeoTransform` from `GetProjectionRef()`, `GroundControlPoints`
+  from a WKT) and therefore every `GdalDatasetProjection2.getInstance`
+  caller (`GdalLayerInfo`, `GLGdalMapLayer2`, `MosaicUtils`,
+  `GdalElevationChunk`, `PfpsUtils`, `DRGTileReader`).
+
+Not patched, deliberately: `GdalLibrary.getWkt` (export only — the strategy
+is a transform-time property), `WFSFeatureDataStore3` (builds its own
+transform from a layer SRS; off the G2 path, revisit at G4),
+`Pix4dGeoreferencer`/`GeoPackageLayerInfoSpi` (construct an SRS but never
+transform through it on this path).
+
+### The gate — `GdalProjectionSmoke`, the engine's own path, quoted
+
+```text
+gdal-projection-smoke: GdalLibrary.init() stopped at a missing native (expected until b.1): com.atakmap.map.gdal.VSIJFileFilesystemHandler.installFilesystemHandler(Ljava/lang/String;Lcom/atakmap/map/gdal/VSIJFileFilesystemHandler;)V
+gdal-projection-smoke: GdalLibrary.EPSG_4326 axis mapping strategy=0 (OAMS_TRADITIONAL_GIS_ORDER=0)
+gdal-projection-smoke: projection GeoTransform srid=4326
+gdal-projection-smoke: image(0,0) → lat 37.800000 lon -122.500000
+gdal-projection-smoke: ground(centre) → image(32.000000, 32.000000)
+gdal-projection-smoke: PASS
+```
+
+It is compiled by `render/env.sh`'s pass, so the shadows are the classes
+under test, and it runs the real `GdalLibrary.init()` with the engine
+dylibs loaded — `gdal.AllRegister`, the config options, `EPSG_4326`,
+`registerProjectionSpi` (JNI) — then `GdalDatasetProjection2.getInstance`
+on a 64×64 EPSG:4326 GeoTIFF and round-trips pixel (0,0) ↔ NW corner and
+centre ↔ (32,32) to 1e-9/1e-6. **A/B:** with the two shadows removed and
+`render-classes` cleared, the same smoke reports `strategy=1` and FAILs on
+the first gate (`EPSG_4326 is not in traditional GIS order`); b.0's
+bindings-level probe already showed what the transform then does
+(`(Infinity, Infinity)`).
+
+### Traps found on the way (#49–#50)
+
+| trap | what it is / what now guards it |
+|------|---------------------------------|
+| #49 | **`android-port-3.1.0.jar` ships a GDAL 2.4-era `org.gdal.*` (66 classes).** With it ahead on the classpath the shadow failed to compile (`osrConstants` has no `OAMS_*`), and at run time its `gdalJNI` — GDAL 2.4 SWIG signatures — would bind against our 3.13 `libgdalalljni`: that stale copy, not a missing one, is what trap 17's `UnsatisfiedLinkError` came from. **Guard:** `render/env.sh` puts `gdal.jar` *first* in `CP` (comment at the site names this trap) and fails loudly when `make gdal-java` hasn't staged it; `GdalJavaSmoke` (b.0) asserts the loaded GDAL's `VersionInfo` equals `gdal-config --version`. b.0's "the transplant jar does not ship org.gdal" is corrected above. |
+| #50 | **`GdalLibrary.init()` throws `UnsatisfiedLinkError` at `VSIJFileFilesystemHandler.installFilesystemHandler`.** `vsi_jfile.cpp` + `jvsijfilefilesystemhandler.cpp` are excluded from the JNI glue (`build-native.sh`: GDAL VSI API drift, same family as the LAS exclusion), and `init()` catches only `IOException`, so the engine's GDAL init cannot complete on this build — `initSuccess` stays false and `IOProviderFactory`'s VSI prefix is never installed. Everything before that line (`AllRegister`, `EPSG_4326`, `registerProjectionSpi`) does run, which is what b.2's gate relies on; the smoke prints the ULE as a known gap rather than hiding it. **Guard:** the smoke's first line names the missing native every run. **Fix:** b.1 — either patch the two TUs for the VSI drift (a `VSIFilesystemHandler` signature update) or an engine Java patch making `installFilesystemHandler` optional on this host; `GdalTileReader` needs `init()` to return true. |
+
+### Also changed
+
+- `make check-engine-shadows` handles a patch spanning several shadows:
+  copy all shadowed upstream files first, apply each distinct patch once,
+  then `cmp` each shadow (the old per-pair loop would have applied a
+  two-file patch against a one-file tree). Negative run verified: a
+  perturbed shadow reports DRIFT and exits 1.
+- `render/run.sh` and `shell/run.sh` add `$GDAL_JAVA` to
+  `java.library.path` so `gdalJNI`'s `System.loadLibrary("gdalalljni")`
+  resolves; `env.sh` exports `GDAL_JAVA` for that.
+
+### Gates and provenance
+
+`make check-engine-shadows` OK (+ negative); `make test-gdal-projection`
+PASS (+ A/B FAIL without shadows); `make test-render` 3/3 with 0 KHR_debug
+messages, `test-render-window` 2/2, `test-render-resize` 2/2 — the
+classpath reorder (gdal.jar first) changed nothing on the existing path;
+`make build-shell` compiles; `shellcheck -x` on env/run scripts; CI
+`render-angle` gains the `test-gdal-projection` step right after
+`gdal-java`.

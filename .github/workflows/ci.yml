@@ -458,6 +458,13 @@ jobs:
         if: needs.changes.outputs.changed == 'true'
         run: bash dev/g1/headless/test/datapackage.sh
 
+      - name: CoT text-path canary
+        # Pure JDK like the importer canary: CotEvent.parse (receive) and
+        # CotXml (send) — escaping, --send-marker checks, direct-child
+        # <point>/<contact> lookup, XXE refusal (test/cot.sh).
+        if: needs.changes.outputs.changed == 'true'
+        run: bash dev/g1/headless/test/cot.sh
+
       - name: Compile-only gate for the headless launcher src
         # #29: nothing above type-checked dev/g1/headless/src — the launcher
         # javacs itself at launch (atak-headless), so HeadlessCLI.java and the

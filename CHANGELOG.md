@@ -36,6 +36,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   staging trees from the repo alone (pristine + gdal-drift + committed
   patches). Validated by byte-rebuild: both trees and every regenerated
   patch come back byte-identical (`dev/g1/tools/README.md`).
+- G2.4 b.0 — the `org.gdal` Java bindings (trap 17): `make gdal-java`
+  (`dev/g2/fetch-gdal-java.sh`) generates the GDAL SWIG Java bindings from
+  the sha256-pinned OSGeo release tarball matching `gdal-config --version`
+  and links `libgdalalljni.dylib` against the same Homebrew `libgdal` the
+  engine dylib links (install names asserted equal — one GDAL instance in
+  the process); `gdal.jar` via `javac -source 8`, adhoc-signed,
+  `PROVENANCE.txt`. `smoke/GdalJavaSmoke` proves load + version match,
+  GTiff create/write/reopen/read, and records the GDAL 3 axis-order
+  verdict for the engine's `SpatialReference` construction (trap #48,
+  `dev/g2/NOTES.md` §G2.4b): it flips — `GdalLibrary` needs
+  `OAMS_TRADITIONAL_GIS_ORDER` (b.2). Runs in CI's `render-angle` job;
+  Brewfile + lock gain `swig`.
 
 ### Fixed
 

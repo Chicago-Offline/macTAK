@@ -1,4 +1,4 @@
-.PHONY: help hooks build build-angle angle gen-gles-shim check-gen-gles-shim check-engine-shadows test test-roundtrip test-render test-render-resize build-window-host test-render-window smoke-window lint clean
+.PHONY: help hooks build build-angle angle gdal-java gen-gles-shim check-gen-gles-shim check-engine-shadows test test-roundtrip test-render test-render-resize build-window-host test-render-window smoke-window lint clean
 
 # The android.opengl.GLES20/30 runtime is GENERATED (dev/g2/gen-gles-shim.py):
 # two Java classes, the JNI bodies and the stub-mode libGLESv2. Edit the
@@ -24,6 +24,7 @@ help:
 	@echo "  build          - build native + commo (dev/g1/build-native.sh, dev/g1/build-commo.sh)"
 	@echo "  angle          - stage ANGLE (EGL/GLES on Metal) into dev/g2/angle-dist (dev/g2/fetch-angle.sh)"
 	@echo "  build-angle    - build native with ANGLE in the GLES slot (MACTAK_GLES=angle) + commo"
+	@echo "  gdal-java      - G2.4b: build the GDAL SWIG Java bindings (org.gdal) against Homebrew libgdal into dev/g2/gdal-java-dist + smoke (dev/g2/fetch-gdal-java.sh)"
 	@echo "  gen-gles-shim  - regenerate the android.opengl GLES shim (Java + JNI + stub) from the transplant jar x gl3.h"
 	@echo "  check-gen-gles-shim - regenerate and fail if the committed shim files differ (CI drift gate)"
 	@echo "  check-engine-shadows - fail if a shadowed engine Java class differs from upstream src/ + its dev/g1/patches hunk (CI drift gate)"
@@ -48,6 +49,9 @@ angle:
 
 build-angle: angle
 	MACTAK_GLES=angle bash dev/g1/build-native.sh && bash dev/g1/build-commo.sh
+
+gdal-java:
+	bash dev/g2/fetch-gdal-java.sh && bash dev/g2/smoke/run-gdal-java.sh
 
 gen-gles-shim:
 	python3 $(GLES_SHIM_GEN) $(GLES_SHIM_JAR) $(GLES_SHIM_GL3H) dev/g2/render/src/android/opengl \

@@ -66,8 +66,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`dev/g1/patches/gdal3-axis-order-traditional-gis.patch`). Also: the
   render classpath puts `gdal.jar` ahead of `android-port-3.1.0.jar`, whose
   GDAL 2.4-era `org.gdal` copy was the real source of trap 17's
-  `UnsatisfiedLinkError` (trap #49); `GdalLibrary.init()` still stops at the
-  excluded VSI filesystem-handler native (trap #50, b.1).
+  `UnsatisfiedLinkError` (trap #49); `GdalLibrary.init()` still stopped at
+  the excluded VSI filesystem-handler native (trap #50) until the next entry.
+- `GdalLibrary.init()` completes on GDAL 3 (trap #50): `jni/vsi_jfile.cpp`
+  rejoins the JNI glue via `dev/g1/patches/vsi-jfile-gdal3-api.patch`, which
+  ports its `VSIFilesystemHandler`/`VSIVirtualHandle` overrides to GDAL 3's
+  interface (`Open` → `VSIVirtualHandleUniquePtr` + options, byte-count
+  `Read`/`Write`, new `ClearErr`/`Error`, `shared_ptr` `InstallHandler`).
+  The `/vsitakio/` Java-backed virtual filesystem is installed again;
+  `GdalProjectionSmoke` asserts `init() == true` and opens a GeoTIFF through
+  it (G2.4 b.1a).
 - JNI layer bridge: a Java exception thrown inside a `GLLayer3` callback no
   longer poisons the render thread. `ManagedGLLayer2` now reports (once) and
   clears exceptions thrown by `getSubject()`, `draw()`, `release()`,

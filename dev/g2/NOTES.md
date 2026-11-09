@@ -946,6 +946,9 @@ transform through it on this path).
 
 ### The gate — `GdalProjectionSmoke`, the engine's own path, quoted
 
+(b.2's run; the first line is trap #50, closed by b.1a below — the current
+gate output is quoted there.)
+
 ```text
 gdal-projection-smoke: GdalLibrary.init() stopped at a missing native (expected until b.1): com.atakmap.map.gdal.VSIJFileFilesystemHandler.installFilesystemHandler(Ljava/lang/String;Lcom/atakmap/map/gdal/VSIJFileFilesystemHandler;)V
 gdal-projection-smoke: GdalLibrary.EPSG_4326 axis mapping strategy=0 (OAMS_TRADITIONAL_GIS_ORDER=0)
@@ -971,7 +974,7 @@ bindings-level probe already showed what the transform then does
 | trap | what it is / what now guards it |
 |------|---------------------------------|
 | #49 | **`android-port-3.1.0.jar` ships a GDAL 2.4-era `org.gdal.*` (66 classes).** With it ahead on the classpath the shadow failed to compile (`osrConstants` has no `OAMS_*`), and at run time its `gdalJNI` — GDAL 2.4 SWIG signatures — would bind against our 3.13 `libgdalalljni`: that stale copy, not a missing one, is what trap 17's `UnsatisfiedLinkError` came from. **Guard:** `render/env.sh` puts `gdal.jar` *first* in `CP` (comment at the site names this trap) and fails loudly when `make gdal-java` hasn't staged it; `GdalJavaSmoke` (b.0) asserts the loaded GDAL's `VersionInfo` equals `gdal-config --version`. b.0's "the transplant jar does not ship org.gdal" is corrected above. |
-| #50 | **`GdalLibrary.init()` throws `UnsatisfiedLinkError` at `VSIJFileFilesystemHandler.installFilesystemHandler`.** `vsi_jfile.cpp` + `jvsijfilefilesystemhandler.cpp` are excluded from the JNI glue (`build-native.sh`: GDAL VSI API drift, same family as the LAS exclusion), and `init()` catches only `IOException`, so the engine's GDAL init cannot complete on this build — `initSuccess` stays false and `IOProviderFactory`'s VSI prefix is never installed. Everything before that line (`AllRegister`, `EPSG_4326`, `registerProjectionSpi`) does run, which is what b.2's gate relies on; the smoke prints the ULE as a known gap rather than hiding it. **Guard:** the smoke's first line names the missing native every run. **Fix:** b.1 — either patch the two TUs for the VSI drift (a `VSIFilesystemHandler` signature update) or an engine Java patch making `installFilesystemHandler` optional on this host; `GdalTileReader` needs `init()` to return true. |
+| #50 | ~~**`GdalLibrary.init()` throws `UnsatisfiedLinkError` at `VSIJFileFilesystemHandler.installFilesystemHandler`.**~~ **Fixed 2026-11-09 (b.1a, below).** `vsi_jfile.cpp` was excluded from the JNI glue (`build-native.sh`: GDAL VSI API drift, same family as the LAS exclusion), and `init()` catches only `IOException`, so the engine's GDAL init could not complete on this build — `initSuccess` stayed false and `IOProviderFactory`'s VSI prefix was never installed. Everything before that line (`AllRegister`, `EPSG_4326`, `registerProjectionSpi`) did run, which is what b.2's gate relied on at the time. **Guard now:** `GdalProjectionSmoke` asserts `init() == true` and opens a GeoTIFF through `/vsitakio/`. |
 
 ### Also changed
 
@@ -993,3 +996,61 @@ classpath reorder (gdal.jar first) changed nothing on the existing path;
 `make build-shell` compiles; `shellcheck -x` on env/run scripts; CI
 `render-angle` gains the `test-gdal-projection` step right after
 `gdal-java`.
+
+## G2.4b — step b.1a: `vsi_jfile.cpp` rejoins the glue; `GdalLibrary.init()` completes (2026-11-09)
+
+Trap #50's fix. `GdalTileReader` (b.1's target) needs `GdalLibrary.init()`
+to return true, and `init()` ends by installing the engine's Java-backed
+GDAL virtual filesystem (`/vsitakio/` → `VSIFileFileSystemHandler` →
+`java.nio.channels.FileChannel`, the hook `IOProviderFactory`-backed and
+encrypted storage use later). Its native, `jni/vsi_jfile.cpp`, had been
+excluded since G1.0 for "GDAL VSI API drift". The drift turned out to be
+four signatures and two missing pure virtuals:
+
+| GDAL 2.4 (`vsi_jfile.cpp` as written) | GDAL 3.13 (`cpl_vsi_virtual.h`) |
+|---|---|
+| `VSIVirtualHandle *Open(name, access, bool bSetError)` | `VSIVirtualHandleUniquePtr Open(name, access, bool bSetError, CSLConstList papszOptions)` |
+| `size_t Read(void*, size_t nSize, size_t nMemb)` virtual | `size_t Read(void*, size_t nBytes)` pure virtual; the size×count form is a non-virtual base wrapper |
+| `size_t Write(const void*, size_t, size_t)` virtual | `size_t Write(const void*, size_t nBytes)` pure virtual (same) |
+| — | `void ClearErr()`, `int Error()` pure virtual (GDAL 3.9+) |
+| `VSIFileManager::InstallHandler(prefix, VSIFilesystemHandler*)` | deprecated; `InstallHandler(prefix, std::shared_ptr<…>)` |
+
+`dev/g1/patches/vsi-jfile-gdal3-api.patch` ports exactly that: `Open`
+returns `VSIVirtualHandleUniquePtr(new VSIJFileHandle(…))`/`nullptr`;
+`Read`/`Write` take byte counts and return bytes (the `n/nSize` element
+division is gone — GDAL's wrapper does it); a `m_error` flag set when the
+Java `read`/`write` threw backs `Error()`/`ClearErr()`; the handler is
+installed via `std::make_shared`. Seek/Tell/Eof/Close/Stat are untouched.
+`build-native.sh` drops the exclusion (the companion
+`jvsijfilefilesystemhandler.cpp` named in the old regex does not exist at
+the pin; its javah header is already in `dev/g1/jni-include/`).
+
+### The gate — `GdalProjectionSmoke`, tightened, quoted
+
+```text
+gdal-projection-smoke: GdalLibrary.init() = true
+gdal-projection-smoke: GdalLibrary.EPSG_4326 axis mapping strategy=0 (OAMS_TRADITIONAL_GIS_ORDER=0)
+gdal-projection-smoke: projection GeoTransform srid=4326
+gdal-projection-smoke: image(0,0) → lat 37.800000 lon -122.500000
+gdal-projection-smoke: ground(centre) → image(32.000000, 32.000000)
+gdal-projection-smoke: /vsitakio/ open OK 64x64 gt[0]=-122.5000 gt[3]=37.8000 driver=GTiff
+gdal-projection-smoke: PASS
+```
+
+The b.2 tolerance (`catch (UnsatisfiedLinkError)` + a "stopped at a missing
+native" line) is removed: `init()` must return `true`. New third proof: the
+same GeoTIFF is opened as `/vsitakio/<path>` — GDAL's GTiff driver now runs
+`VSIJFileFilesystemHandler::Open`/`Stat` and `VSIJFileHandle::Seek`/`Read`/
+`Tell`/`Eof` against a `FileChannel` — and must report the same size and
+geotransform and read its band. That exercises every ported override on the
+read path.
+
+### Gates and provenance
+
+Full `MACTAK_GLES=angle bash dev/g1/build-native.sh` (patch applied, TU
+compiled, 33 GTest + JVM load canaries PASS); `make test-gdal-projection`
+PASS; `make test` PASS; `make test-render` 3/3 (0 KHR_debug),
+`test-render-window` 2/2, `test-render-resize` 2/2; `make build-shell`;
+`make lint`. Nothing else changes in the glue: the only new exports are
+`Java_com_atakmap_map_gdal_VSIJFileFilesystemHandler_installFilesystemHandler`
+and the two classes. Stacked on #68 (b.2) because the gate is b.2's smoke.

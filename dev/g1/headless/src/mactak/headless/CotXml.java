@@ -50,7 +50,11 @@ final class CotXml {
     /**
      * Escape a value for an XML attribute or text node. uid and callsign come
      * from the command line or a data package: an apostrophe (O'BRIEN) or an
-     * ampersand would otherwise make every presence/marker unparseable.
+     * ampersand would otherwise make every presence/marker unparseable. Tab,
+     * LF and CR become character references (a parser normalizes them to a
+     * space in an attribute); characters XML 1.0 cannot carry at all (other
+     * C0 controls, U+FFFE/U+FFFF, unpaired surrogates) become U+FFFD, since
+     * one of them makes the whole event unparseable.
      */
     static String xmlEscape(String value) {
         final StringBuilder sb = new StringBuilder(value.length());
@@ -62,7 +66,19 @@ final class CotXml {
                 case '>':  sb.append("&gt;");   break;
                 case '\'': sb.append("&apos;"); break;
                 case '"':  sb.append("&quot;"); break;
-                default:   sb.append(c);
+                case '\t': sb.append("&#9;");   break;
+                case '\n': sb.append("&#10;");  break;
+                case '\r': sb.append("&#13;");  break;
+                default:
+                    if (Character.isHighSurrogate(c) && i + 1 < value.length()
+                            && Character.isLowSurrogate(value.charAt(i + 1))) {
+                        sb.append(c).append(value.charAt(++i));
+                    } else if (c < 0x20 || c == 0xFFFE || c == 0xFFFF
+                            || Character.isSurrogate(c)) {
+                        sb.append('\uFFFD');
+                    } else {
+                        sb.append(c);
+                    }
             }
         }
         return sb.toString();

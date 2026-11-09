@@ -115,6 +115,32 @@ public final class CotEventSelfTest {
         check(msg != null && msg.contains("DOCTYPE"),
                 "DOCTYPE (XXE) refused: " + msg);
 
+        // --- <point> numbers (audit pass 2) -----------------------------------
+        // A point without a usable lat/lon is not a position: persisted, it
+        // read back from the tracks DB as 0,0 (null island).
+        msg = parseMustFail("<event uid='u' type='t'><point lon='2'/></event>");
+        check(msg != null && msg.contains("no lat"), "missing lat refused: " + msg);
+        msg = parseMustFail("<event uid='u' type='t'><point lat='1'/></event>");
+        check(msg != null && msg.contains("no lon"), "missing lon refused: " + msg);
+        msg = parseMustFail("<event uid='u' type='t'><point lat='NaN' lon='2'/></event>");
+        check(msg != null, "NaN lat refused: " + msg);
+        msg = parseMustFail("<event uid='u' type='t'><point lat='1' lon='Infinity'/></event>");
+        check(msg != null, "Infinity lon refused: " + msg);
+        msg = parseMustFail("<event uid='u' type='t'><point lat='90.5' lon='2'/></event>");
+        check(msg != null && msg.contains("out of range"), "lat > 90 refused: " + msg);
+        msg = parseMustFail("<event uid='u' type='t'><point lat='1' lon='-180.01'/></event>");
+        check(msg != null && msg.contains("out of range"), "lon < -180 refused: " + msg);
+        msg = parseMustFail("<event uid='u' type='t'><point lat='45f' lon='0x1p5'/></event>");
+        check(msg != null && msg.contains("not a number"),
+                "Java-only number forms (45f, 0x1p5) refused: " + msg);
+        msg = parseMustFail("<event uid='u' type='t'><point lat='1' lon='2' hae='12d'/></event>");
+        check(msg != null && msg.contains("not a number"), "Java-only hae form refused: " + msg);
+        e = CotEvent.parse("<event uid='u-8' type='t'>"
+                + "<point lat='-90' lon='180' hae='NaN' ce='9999999.0' le='1e2'/></event>");
+        check(e.lat == -90.0 && e.lon == 180.0 && Double.isNaN(e.hae)
+                        && e.ce == 9999999.0 && e.le == 100.0,
+                "range bounds inclusive; hae='NaN' is unknown; exponent form read");
+
         // An XML prolog is fine (commo prefixes one on the wire).
         e = CotEvent.parse("<?xml version='1.0' encoding='UTF-8'?>"
                 + "<event uid='u-7' type='t'><point lat='1' lon='2'/></event>");
@@ -128,6 +154,13 @@ public final class CotEventSelfTest {
                 "xmlEscape leaves plain text alone");
         check("&amp;amp;".equals(CotXml.xmlEscape("&amp;")),
                 "xmlEscape escapes an existing entity (no double-decode)");
+
+        check("a&#9;b&#10;c&#13;d".equals(CotXml.xmlEscape("a\tb\nc\rd")),
+                "xmlEscape keeps tab/LF/CR as character references");
+        check("x\uFFFDy\uFFFDz".equals(CotXml.xmlEscape("x\u0001y\uFFFEz")),
+                "xmlEscape replaces characters XML 1.0 cannot carry");
+        check("\uD83D\uDE00\uFFFD".equals(CotXml.xmlEscape("\uD83D\uDE00\uD83D")),
+                "xmlEscape keeps a surrogate pair, replaces an unpaired surrogate");
 
         check("37.7749".equals(CotXml.coordinate("37.7749", CotXml.MAX_LAT)),
                 "lat 37.7749 kept as given");
@@ -171,6 +204,12 @@ public final class CotEventSelfTest {
                 "presence time/start/stale are CoT UTC times, stale after time");
         check(xml.contains("<__group name='Cyan' role='Team Member'/>"),
                 "presence carries the __group OpenTAKServer needs to register");
+
+        String ctlCs = "TAB\tNL\nBEL\u0007";
+        CotEvent c = CotEvent.parse(CotXml.presence("u-ctl", ctlCs));
+        check("TAB\tNL\nBEL\uFFFD".equals(c.callsign),
+                "presence with control characters in the callsign stays parseable: "
+                        + c.callsign);
 
         String m = CotXml.marker(hostileUid, hostileCs,
                 CotXml.coordinate("37.7749", CotXml.MAX_LAT),

@@ -2,6 +2,7 @@ package mactak.headless;
 
 import java.io.StringReader;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
@@ -78,7 +79,8 @@ public final class CotEvent {
         return new CotEvent(
                 ev.getAttribute("uid"), ev.getAttribute("type"), ev.getAttribute("how"),
                 ev.getAttribute("time"), ev.getAttribute("start"), ev.getAttribute("stale"),
-                num(pt, "lat"), num(pt, "lon"), num(pt, "hae"), num(pt, "ce"), num(pt, "le"),
+                coord(pt, "lat", 90.0), coord(pt, "lon", 180.0),
+                optional(pt, "hae"), optional(pt, "ce"), optional(pt, "le"),
                 callsign);
     }
 
@@ -97,9 +99,43 @@ public final class CotEvent {
         return null;
     }
 
-    private static double num(Element e, String attr) {
-        final String v = e.getAttribute(attr);
-        return v.isEmpty() ? Double.NaN : Double.parseDouble(v);
+    /**
+     * A CoT decimal: optional sign, digits with an optional fraction, an
+     * optional exponent. Double.parseDouble alone also takes Java-only forms
+     * ("45f", "0x1p5", " 1 ", "Infinity") that no other CoT parser reads.
+     */
+    private static final Pattern DECIMAL =
+            Pattern.compile("[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?");
+
+    /**
+     * lat/lon: required, a finite CoT decimal within [-limit, limit]. A
+     * point without them is not a position: persisted, it would read back
+     * from the tracks DB as 0,0 (sqlite stores "NaN" as text in a REAL
+     * column, and a numeric read of that text is 0.0).
+     */
+    private static double coord(Element pt, String attr, double limit) {
+        final String v = pt.getAttribute(attr);
+        if (v.isEmpty())
+            throw new IllegalArgumentException("<point> has no " + attr);
+        final double d = decimal(attr, v);
+        if (Double.isInfinite(d) || Math.abs(d) > limit)
+            throw new IllegalArgumentException("<point> " + attr + "=" + v + " is out of range");
+        return d;
+    }
+
+    /** hae/ce/le: optional; absent or the literal "NaN" is unknown (NaN). */
+    private static double optional(Element pt, String attr) {
+        final String v = pt.getAttribute(attr);
+        if (v.isEmpty() || "NaN".equals(v))
+            return Double.NaN;
+        final double d = decimal(attr, v);
+        return Double.isInfinite(d) ? Double.NaN : d;
+    }
+
+    private static double decimal(String attr, String v) {
+        if (!DECIMAL.matcher(v).matches())
+            throw new IllegalArgumentException("<point> " + attr + "=" + v + " is not a number");
+        return Double.parseDouble(v);
     }
 
     // Network input: no DTDs, no external entities (XXE hardening).

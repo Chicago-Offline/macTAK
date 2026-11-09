@@ -889,3 +889,47 @@ engine code its patches touch. Fixed on the branch:
 
 `DataPackageSelfTest` gains seven assertions for the above. Run against
 the pre-audit `DataPackage`/`ConnectOptions`, they fail (A/B checked).
+
+## G1.11 — correctness audit, pass 2 (2026-11-09)
+
+Covers the `dev/g1/` files §G1.10 didn't reach: `TrackStore`, `LayerCLI`,
+`CotXml` (split out by the CoT canary), `run.sh`, the `atak-headless`
+launcher, `fake-cot-server.py`, `smoke/`, `jni-tests/run.sh`, `jni-extra/`,
+`gen-jni-headers.sh` and the test scripts. Fixed:
+
+- `CotEvent` — `<point lat lon>` must be present, a plain CoT decimal,
+  finite and within ±90/±180. Before, a missing or `NaN`/`Infinity` lat/lon
+  parsed as NaN/∞ and was persisted. sqlite keeps `"NaN"` as text in a REAL
+  column and a numeric read of it is 0.0, so the track plotted at 0,0.
+  `Double.parseDouble` also took `45f`, `0x1p5` and padded values. These
+  are refused now, for hae/ce/le too. hae/ce/le stay optional: absent or
+  `NaN` means unknown.
+- `TrackStore` — an unknown `hae` binds SQL NULL (`NULLIF(?, '')`, like the
+  callsign) and reads back as NaN. It used to be stored as `"NaN"` text and
+  read back as 0.0 m.
+- `CotXml.xmlEscape` — tab/LF/CR become character references. In an
+  attribute a parser turns them into spaces. Other C0 controls, U+FFFE/FFFF
+  and unpaired surrogates become U+FFFD. Before, one BEL in a callsign made
+  every presence and marker unparseable.
+- `HeadlessCLI` — every exit path called `System.exit` inside the `try` or
+  a `catch`. That never returns, so the `finally` that closes the tracks DB
+  never ran on a failure. The exit code is now computed in the `try` and
+  `System.exit` runs once, after the `finally`.
+- `run.sh` — the wait for A's iface-up checks whether A is still alive. If
+  A exits first (connect refused, bad cert, native load), the script now
+  fails at once with A's exit code. Before, it waited the full 90 s.
+
+`CotEventSelfTest` gains 13 assertions: 9 for the `<point>` numbers, 3 for
+xmlEscape and a presence round-trip with control characters. 12 fail
+against main's `CotEvent`/`CotXml`. The 13th, an inclusive-bounds case,
+passes on both, so the new checks don't over-reject. The control-character
+case shows main's presence builder emitting XML its own parser rejects
+(A/B checked). The `TrackStore` statements were
+checked against sqlite directly; they need the engine dylibs to run in
+process.
+
+Reviewed, no change needed: `LayerCLI`/`LayerStore` argument handling,
+`fake-cot-server.py` framing (test fixture only: a non-blocking `sendall`
+that hits a full peer buffer drops that client), the smoke and jni-tests
+runners, the `jni-extra` shims (null-checked UTF chars, providers loaded
+once), and `gen-jni-headers.sh`.

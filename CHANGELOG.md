@@ -83,6 +83,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `CotEvent` reads `<point>`/`<contact>` as direct children,
   `LayerStore.bounds()` now unions Z, and `test/layer.sh` checks exact
   feature counts.
+- G1 correctness audit, pass 2 (`dev/g1/NOTES.md` §G1.11): a received
+  `<point>` without a finite, in-range lat/lon is refused instead of
+  persisted. The tracks DB read it back as 0,0. Java-only number forms
+  (`45f`, `0x1p5`) are refused too. An unknown `hae` is stored as SQL NULL,
+  not `"NaN"` text. `xmlEscape` keeps tab/LF/CR in a uid or callsign and
+  replaces characters XML 1.0 cannot carry, which had made the outgoing CoT
+  unparseable. atak-headless closes its tracks DB on failure exits too.
+  `run.sh` fails fast when client A exits before iface-up.
 - GDAL 3 axis order (trap #48): `GdalLibrary.EPSG_4326` and every dataset
   SRS `GdalDatasetProjection2` transforms through are pinned to
   `OAMS_TRADITIONAL_GIS_ORDER` via a new `GdalLibrary.traditionalGisOrder`

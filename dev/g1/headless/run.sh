@@ -107,6 +107,17 @@ pid_a=$!
 # then fail loudly with A's log rather than hanging or racing.
 deadline=$((SECONDS + 90))
 until grep -q 'headless: iface-up' "$LOG_A" 2>/dev/null; do
+  # A that already exited (connect refused, bad cert, native load) will
+  # never come up: fail now with its exit code, not after the full 90 s.
+  if ! kill -0 "$pid_a" 2>/dev/null \
+     && ! grep -q 'headless: iface-up' "$LOG_A" 2>/dev/null; then
+    wait "$pid_a"; rc_a=$?
+    echo "run.sh: A exited $rc_a before iface-up — A's log:" >&2
+    tail -n 40 "$LOG_A" >&2 || true
+    trap - EXIT   # keep the evidence for inspection
+    keep_failed
+    exit 1
+  fi
   if (( SECONDS >= deadline )); then
     echo "run.sh: A never reached iface-up within 90s — A's log:" >&2
     tail -n 40 "$LOG_A" >&2 || true

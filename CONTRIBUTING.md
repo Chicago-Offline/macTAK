@@ -58,6 +58,7 @@ gate passes, the artifact was really produced this run.
 |---|---|---|
 | `make build` | engine + comms compile and link | CI + local |
 | `make test-roundtrip` | CoT in/out, hermetically: two headless clients vs `dev/g1/headless/fake-cot-server.py` (no external TAK server) | CI (on `dev/g1/**` changes) + local |
+| `make test-jni` | the wave-5/6 JNI guards and the Java-backed `IOProviderFactory` proxy on a real desktop JVM: guards 7 pins (neutral bailouts, clean `JNI_OnLoad` failure) + kernel 6 pins (real files through the proxy) | CI (native job, Zulu 8) + local; skips (exit 0) when no JDK 8 is installed |
 | `make test-render` | a GeoJSON layer over MBTiles renders through the engine into an EGL pbuffer, zero GL errors, PNG artifact | CI + local |
 | `make test-render-resize` / `test-render-window` | the window surface survives mid-run `drawableSize` changes | CI + local |
 | `make check-gen-gles-shim` | committed GLES shim matches its generator's output | CI + local |

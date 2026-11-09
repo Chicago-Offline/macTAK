@@ -11,6 +11,7 @@ import com.atakmap.commoncommo.InterfaceStatusListener;
 
 import java.io.File;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -203,11 +204,17 @@ public final class HeadlessCLI {
                 case "--duration":  if (i + 1 >= args.length) usage(2);
                                     try { duration = Integer.parseInt(args[++i]); }
                                     catch (NumberFormatException e) { usage(2); }
+                                    // A zero/negative run ends before iface-up and
+                                    // always exits 4 — reject it at usage instead.
+                                    if (duration < 1) usage(2);
                                     break;
                 case "--send-marker":
                     if (i + 2 >= args.length) usage(2);
-                    markerLat = args[++i];
-                    markerLon = args[++i];
+                    // The pair is spliced into the marker CoT: only a finite,
+                    // in-range number, in plain decimal form, may reach the XML.
+                    markerLat = coordinate(args[++i], MAX_LAT);
+                    markerLon = coordinate(args[++i], MAX_LON);
+                    if (markerLat == null || markerLon == null) usage(2);
                     break;
                 case "--db":        if (i + 1 >= args.length) usage(2);
                                     dbPath = args[++i]; break;
@@ -228,9 +235,16 @@ public final class HeadlessCLI {
         // is one pure-data merge (ConnectOptions), asserted by the canary.
         final DataPackage.Resolved dp =
                 dpPath == null ? null : resolveDataPackage(dpPath);
-        final ConnectOptions.Resolved opt = ConnectOptions.resolve(host, port,
-                callsign, certPath, caPath,
-                env("MACTAK_CERT_PASS", null), env("MACTAK_CA_PASS", null), dp);
+        final ConnectOptions.Resolved opt;
+        try {
+            opt = ConnectOptions.resolve(host, port, callsign, certPath, caPath,
+                    env("MACTAK_CERT_PASS", null), env("MACTAK_CA_PASS", null), dp);
+        } catch (IllegalArgumentException e) {
+            System.err.println("atak-headless: cannot use data package '"
+                    + dpPath + "': " + e.getMessage());
+            System.exit(2);
+            return;    // not reached
+        }
         host = opt.host;
         port = opt.port;
         callsign = opt.callsign;
@@ -411,6 +425,47 @@ public final class HeadlessCLI {
         }
     }
 
+    private static final double MAX_LAT = 90.0;
+    private static final double MAX_LON = 180.0;
+
+    /**
+     * value as a plain decimal string when it is a finite number within
+     * [-limit, limit], else null. Normalized because Double.parseDouble also
+     * takes forms a CoT parser does not ("45f", "0x1p5", "1e1").
+     */
+    private static String coordinate(String value, double limit) {
+        final double d;
+        try {
+            d = Double.parseDouble(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        if (Double.isNaN(d) || Math.abs(d) > limit)
+            return null;
+        return BigDecimal.valueOf(d).toPlainString();
+    }
+
+    /**
+     * Escape a value for an XML attribute or text node. uid and callsign come
+     * from the command line or a data package: an apostrophe (O'BRIEN) or an
+     * ampersand would otherwise make every presence/marker unparseable.
+     */
+    static String xmlEscape(String value) {
+        final StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            final char c = value.charAt(i);
+            switch (c) {
+                case '&':  sb.append("&amp;");  break;
+                case '<':  sb.append("&lt;");   break;
+                case '>':  sb.append("&gt;");   break;
+                case '\'': sb.append("&apos;"); break;
+                case '"':  sb.append("&quot;"); break;
+                default:   sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
     private static byte[] readFile(String path) throws IOException {
         return Files.readAllBytes(new File(path).toPath());
     }
@@ -426,7 +481,8 @@ public final class HeadlessCLI {
      * per-client fan-out consumer once a parseable self-SA with uid, callsign
      * and group has arrived; a bare t-x-a-t-a-k ping does not register.
      */
-    private static String presence(String uid, String callsign) {
+    private static String presence(String rawUid, String rawCallsign) {
+        final String uid = xmlEscape(rawUid), callsign = xmlEscape(rawCallsign);
         String t = now(0), stale = now(30000L);
         return "<event version='2.0' uid='" + uid + "' type='a-f-G-U-C'"
                 + " time='" + t + "' start='" + t + "' stale='" + stale + "' how='m-g'>"
@@ -441,7 +497,9 @@ public final class HeadlessCLI {
                 + "</detail></event>";
     }
 
-    private static String marker(String uid, String callsign, String lat, String lon) {
+    private static String marker(String rawUid, String rawCallsign, String lat, String lon) {
+        // lat/lon were validated as plain numbers at argument parsing
+        final String uid = xmlEscape(rawUid), callsign = xmlEscape(rawCallsign);
         String t = now(0), stale = now(120000L);
         return "<event version='2.0' uid='" + uid + "-m1' type='a-f-G-U-C'"
                 + " time='" + t + "' start='" + t + "' stale='" + stale + "' how='m-g'>"

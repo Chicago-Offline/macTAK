@@ -26,6 +26,13 @@ run_one() {   # run_one FILE EXPECTED_FEATURES
   local f="$1" n="$2" log ec=0
   log="$WORK/$(basename "$f").log"
   "$CLI" --layer "$f" --layer-db "$WORK/layers-$(basename "$f")" --expect-features "$n" > "$log" 2>&1 || ec=$?
+  # --expect-features is a floor (>= N); this canary promises EXACTLY N, so
+  # also match LayerCLI's PASS line count — a duplicate-import bug yielding
+  # 2N features must fail here, not pass.
+  if [[ "$ec" == 0 ]] && ! grep -q "^PASS: $n feature(s) " "$log"; then
+    ec=1
+    echo "[layer-test] FAIL $(basename "$f"): expected exactly $n feature(s), got: $(grep -m1 '^PASS: ' "$log" || echo 'no PASS line')"
+  fi
   if [[ "$ec" == 0 ]]; then
     echo "[layer-test] ok   $(basename "$f") ($n feature(s))"
   else

@@ -209,7 +209,12 @@ public final class DataPackage {
                     continue;
                 p12Names.add(name);
                 checkEntryName(name);
-                if (matchesHint(name, trustHint) || lower.contains("trust")) {
+                // An explicit ClientFile hint outranks the "trust" substring
+                // heuristic (a client named trusted-ops.p12 is still a client).
+                boolean isTrust = matchesHint(name, trustHint)
+                        || (!matchesHint(name, clientHint)
+                            && lower.contains("trust"));
+                if (isTrust) {
                     trustName = name;
                     trusts++;
                 } else {
@@ -220,20 +225,21 @@ public final class DataPackage {
             if (p12Names.isEmpty()) {
                 certPath = null;      // a plaintext-server package ships no certs
                 caPath = null;
-            } else if (clients == 1 && trusts == 1) {
+            } else if (clients == 1 && trusts == 1
+                    && !baseName(clientName).equalsIgnoreCase(baseName(trustName))) {
                 certPath = extract(zip, zip.getEntry(clientName), certDir).getPath();
                 caPath = extract(zip, zip.getEntry(trustName), certDir).getPath();
             } else if (p12Names.size() == 2
                     && baseName(p12Names.get(0))
                         .equalsIgnoreCase(baseName(p12Names.get(1)))) {
-                // (#32) Basename hints cannot split a same-basename pair —
-                // both entries classify alike (trusts 2/clients 0 or the
-                // mirror), so the pair check above always fires for them.
-                // Name the real problem instead of claiming a pair is
-                // missing. Nothing was extracted: the cert dir keeps one
-                // flat file per basename, so these two could never coexist
-                // in it — refuse rather than let the second overwrite the
-                // first.
+                // (#32) A same-basename pair lands here whether it classified
+                // alike (basename hints: trusts 2/clients 0 or the mirror) or
+                // split (a "trust" directory: one of each — the pair check
+                // above excludes it). Name the real problem instead of
+                // claiming a pair is missing. Nothing was extracted: the
+                // cert dir keeps one flat file per basename, so these two
+                // could never coexist in it — refuse rather than let the
+                // second overwrite the first.
                 throw new IOException("two PKCS#12s share one basename and "
                         + "could not both live in the cert dir: " + p12Names);
             } else {
@@ -517,7 +523,7 @@ public final class DataPackage {
         String value = null;
         for (Map.Entry<String, String> e : entries.entrySet()) {
             Matcher m = p.matcher(e.getKey());
-            if (m.matches()) {
+            if (m.matches() && m.group(1).length() <= 9) {   // fits an int
                 int n = Integer.parseInt(m.group(1));
                 if (n < best) {
                     best = n;

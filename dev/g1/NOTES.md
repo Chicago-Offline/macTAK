@@ -839,3 +839,53 @@ Traps found on the way (do not rediscover these):
 Evidence: `make build` PASS — canaries 4/4 (dlopen; engine 33/33;
 jni-tests guards 7/7 + kernel 6/6; JVM in-process smoke) + commo
 smoke; `make lint` PASS (0 issues).
+
+## G1.10 — correctness audit (2026-11-09, branch `audit/g1-correctness`)
+
+A bugs-and-correctness pass over everything under `dev/g1/` plus the
+engine code its patches touch. Fixed on the branch:
+
+- `stlvectoradapter-bind-contents.patch` (new) — the same unbound
+  `STLVectorAdapter` bug G1.9's `ioproviderfactory-listfiles-adapter-bind.patch`
+  fixed in the jni proxy, at its two core-engine sites:
+  `atakmap::util::getDirContents` (IO.cpp) and the filtered `IO_listFiles`
+  (IO2.cpp). Each default-constructed `contents_w`, handed it to
+  `listFiles`, then looped over a separate, never-filled `std::vector
+  contents`, so every directory came back empty. The fix binds the
+  adapter: `contents_w(contents)`. The jni hunks were dropped from this
+  patch in favour of G1.9's; the series applies at `--fuzz=0` with or
+  without it.
+- `megatexture-sharetile-comma-operator.patch` regenerated — its hunk
+  header claimed 6 lines for a 7-line hunk, so it only ever applied with
+  fuzz 1. `build-native.sh`/`build-commo.sh` now patch with `--fuzz=0`,
+  so context drift fails the build instead of landing "close enough".
+- `build-native.sh`/`build-commo.sh` EXIT trap — `kill -- -$$` signalled
+  the script's whole process group. Run from a terminal, the script leads
+  its group, so it SIGTERMed itself: exit 143 after a successful build,
+  and the rest of the trap was skipped. Under `make` it was a no-op. It
+  now kills only the script's own background jobs (`jobs -p`).
+- `HeadlessCLI` — uid/callsign are XML-escaped in the presence/marker
+  CoT (a callsign like `O'BRIEN` made every send unparseable); the
+  `--send-marker` pair must be finite and in range, and is normalized to
+  plain decimal before it reaches the XML; `--duration` must be >= 1.
+- `ConnectOptions` — when the address comes from the package, its proto
+  must agree with the cert pair. An `:ssl` address with no certs would
+  connect in plaintext; a plaintext address with shipped certs would open
+  TLS. Both are refused (exit 2) instead of failing at connect.
+- `DataPackage` — a same-basename pair split by a `trust` directory
+  (`certs/ca.p12` + `certs/trust/ca.p12`) classified as one of each and
+  extracted both to one file, the truststore overwriting the client.
+  It's now refused like any same-basename pair. The `ClientFile` hint,
+  read but never used before, now outranks the "trust" substring. An
+  `addressN` index past int range no longer escapes `open()` as an
+  unchecked `NumberFormatException`.
+- `CotEvent` — `<point>` and `<detail><contact>` are read as direct
+  children. The document-wide `getElementsByTagName` could pick a nested
+  `<contact>` (inside `<link>`, chat) or a `<point>` inside `<detail>`.
+- `LayerStore.bounds()` — the union now covers Z as well as X/Y.
+- `test/layer.sh` — it promised "exactly N" features but
+  `--expect-features` is a floor. It now also matches LayerCLI's PASS
+  count exactly, so a duplicated import fails.
+
+`DataPackageSelfTest` gains seven assertions for the above. Run against
+the pre-audit `DataPackage`/`ConnectOptions`, they fail (A/B checked).

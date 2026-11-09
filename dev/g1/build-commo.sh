@@ -41,12 +41,16 @@ log() { printf '\n[g1-commo] %s\n' "$*"; }
 die() { printf '\n[g1-commo] FATAL: %s\n' "$*" >&2; exit 1; }
 
 # Minimal EXIT trap: on failure, report context; always, kill any lingering
-# child process group and sweep the throwaway build tree if we created it.
+# background job and sweep the throwaway build tree if we created it.
 _rc=0
 trap '_rc=$?; if (( _rc != 0 )); then
         printf "[g1-commo] build FAILED (exit %s) at line %s — inspect %s if present\n" "$_rc" "${LINENO:-?}" "$WORK" >&2
       fi
-      { kill -- -$$ 2>/dev/null || true; }
+      # Only our own background jobs: `kill -- -$$` signalled the whole
+      # process group, and when run from a terminal this script LEADS its
+      # group — it SIGTERMed itself, exiting 143 after a successful build
+      # and skipping the rest of this trap (failure cleanup).
+      { kill $(jobs -p) 2>/dev/null || true; }
       if [[ -n "${WORK:-}" && -d "$WORK" && _rc -ne 0 ]]; then
         rm -rf "$WORK"
       fi' EXIT
@@ -82,7 +86,7 @@ rsync -a --exclude .git "$COMMOSRC/" "$WORK/commo/"
 
 for p in "$G1"/patches/commo/*.patch; do
   [[ -e "$p" ]] || continue
-  patch --forward --silent -p1 -d "$WORK/commo" < "$p"
+  patch --forward --silent --fuzz=0 -p1 -d "$WORK/commo" < "$p" || die "patch failed: $(basename "$p")"
   log "  applied $(basename "$p")"
 done
 

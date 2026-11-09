@@ -68,6 +68,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- G1 correctness audit (`dev/g1/NOTES.md` §G1.10): `getDirContents` and
+  the filtered `IO_listFiles` no longer return empty listings. They passed
+  an unbound `STLVectorAdapter` to `listFiles`, the core-engine twin of the
+  jni-proxy bug G1.9 fixed; fixed by the new
+  `dev/g1/patches/stlvectoradapter-bind-contents.patch`. Engine patches now
+  apply with `--fuzz=0`, and the megatexture patch, which had only ever
+  applied with fuzz, is regenerated. The build scripts' EXIT trap no longer
+  SIGTERMs the script itself when it's run from a terminal (exit 143 after
+  a successful build). atak-headless XML-escapes uid/callsign in the CoT it
+  sends, validates `--send-marker`/`--duration`, refuses a data package
+  whose address proto disagrees with its certs, and refuses a
+  same-basename PKCS#12 pair before one file overwrites the other.
+  `CotEvent` reads `<point>`/`<contact>` as direct children,
+  `LayerStore.bounds()` now unions Z, and `test/layer.sh` checks exact
+  feature counts.
 - GDAL 3 axis order (trap #48): `GdalLibrary.EPSG_4326` and every dataset
   SRS `GdalDatasetProjection2` transforms through are pinned to
   `OAMS_TRADITIONAL_GIS_ORDER` via a new `GdalLibrary.traditionalGisOrder`

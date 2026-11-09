@@ -77,7 +77,9 @@ public final class LayerStore implements AutoCloseable {
                 if (out == null) out = new Envelope(e.minX, e.minY, e.minZ, e.maxX, e.maxY, e.maxZ);
                 else {
                     out.minX = Math.min(out.minX, e.minX); out.minY = Math.min(out.minY, e.minY);
+                    out.minZ = Math.min(out.minZ, e.minZ);
                     out.maxX = Math.max(out.maxX, e.maxX); out.maxY = Math.max(out.maxY, e.maxY);
+                    out.maxZ = Math.max(out.maxZ, e.maxZ);
                 }
             }
         } finally {

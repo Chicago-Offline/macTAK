@@ -9,7 +9,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
-import org.w3c.dom.NodeList;
+import org.w3c.dom.Node;
 import org.xml.sax.InputSource;
 
 /**
@@ -60,15 +60,18 @@ public final class CotEvent {
         if (ev.getAttribute("uid").isEmpty())
             throw new IllegalArgumentException("<event> has no uid");
 
-        final NodeList pts = ev.getElementsByTagName("point");
-        if (pts.getLength() == 0)
+        // Direct children only: <detail> may nest its own <point> (e.g.
+        // <precisionlocation>) or <contact> elements (links, chat
+        // recipients) that a document-wide search would pick up instead.
+        final Element pt = child(ev, "point");
+        if (pt == null)
             throw new IllegalArgumentException("<event uid=" + ev.getAttribute("uid") + "> has no <point>");
-        final Element pt = (Element) pts.item(0);
 
         String callsign = null;
-        final NodeList contacts = ev.getElementsByTagName("contact");
-        if (contacts.getLength() > 0) {
-            final String cs = ((Element) contacts.item(0)).getAttribute("callsign");
+        final Element detail = child(ev, "detail");
+        final Element contact = detail == null ? null : child(detail, "contact");
+        if (contact != null) {
+            final String cs = contact.getAttribute("callsign");
             if (!cs.isEmpty()) callsign = cs;
         }
 
@@ -83,6 +86,15 @@ public final class CotEvent {
     public String toString() {
         return String.format(Locale.US, "uid=%s type=%s callsign=%s lat=%.6f lon=%.6f time=%s",
                 uid, type, callsign == null ? "-" : callsign, lat, lon, time);
+    }
+
+    /** The first direct child element of parent named tag, or null. */
+    private static Element child(Element parent, String tag) {
+        for (Node n = parent.getFirstChild(); n != null; n = n.getNextSibling()) {
+            if (n instanceof Element && tag.equals(((Element) n).getTagName()))
+                return (Element) n;
+        }
+        return null;
     }
 
     private static double num(Element e, String attr) {

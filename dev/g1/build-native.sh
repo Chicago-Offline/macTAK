@@ -35,7 +35,7 @@ log() { printf '\n[g1] %s\n' "$*"; }
 die() { printf '\n[g1] FATAL: %s\n' "$*" >&2; exit 1; }
 
 # Minimal EXIT trap: on failure, report context; always, kill any lingering
-# child process group and sweep the throwaway build tree if we created it.
+# background job and sweep the throwaway build tree if we created it.
 # G1_CLEANED_ON_EXIT=1 skips the sweep so $WORK survives a failed build for
 # post-mortem inspection (documented by the post-G0 audit; the knob existed
 # but was referenced nowhere else).
@@ -43,7 +43,11 @@ _rc=0
 trap '_rc=$?; if (( _rc != 0 )); then
         printf "[g1] build FAILED (exit %s) at line %s — inspect %s if present\n" "$_rc" "${LINENO:-?}" "$WORK" >&2
       fi
-      { kill -- -$$ 2>/dev/null || true; }
+      # Only our own background jobs: `kill -- -$$` signalled the whole
+      # process group, and when run from a terminal this script LEADS its
+      # group — it SIGTERMed itself, exiting 143 after a successful build
+      # and skipping the rest of this trap (failure cleanup).
+      { kill $(jobs -p) 2>/dev/null || true; }
       if [[ -n "${WORK:-}" && -d "$WORK" && "${G1_CLEANED_ON_EXIT:-0}" != 1 && _rc -ne 0 ]]; then
         rm -rf "$WORK"
       fi' EXIT
@@ -87,7 +91,9 @@ rsync -a --exclude .git "$ENGINE_MAIN/" "$WORK/engine/"
 
 log "applying GDAL-drift patches (-p3 → cpp/...)"
 for p in "$DEV"/spike/g0/patches/gdal-drift-*.patch "$G1"/patches/*.patch; do
-  patch --forward --silent -p3 -d "$WORK/engine" < "$p" || die "patch failed: $(basename "$p")"
+  # --fuzz=0: a hunk whose context no longer matches must fail loudly, not
+  # land "close enough" (megatexture-sharetile applied with fuzz 1 for weeks)
+  patch --forward --silent --fuzz=0 -p3 -d "$WORK/engine" < "$p" || die "patch failed: $(basename "$p")"
   log "  applied $(basename "$p")"
 done
 

@@ -44,6 +44,16 @@ public final class DataPackageSelfTest {
         }
     }
 
+    /** ConnectOptions.resolve from a package alone, expecting a refusal. */
+    private static String resolveMustThrow(DataPackage.Resolved dp) {
+        try {
+            ConnectOptions.resolve(null, -1, null, null, null, null, null, dp);
+            return null;
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
+        }
+    }
+
     private static File writeZip(File out, String prefXml,
                                  String[] names, byte[][] blobs) throws IOException {
         ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(out));
@@ -340,6 +350,70 @@ public final class DataPackageSelfTest {
                 "no package keeps --connect unset (usage(2) guards it)");
         check("HEADLESS".equals(m.callsign) && "atakatak".equals(m.certPass),
                 "no package: callsign and password defaults still apply");
+
+        // --- address proto vs cert pair (audit) -------------------------
+        // An ssl address with no certs would connect plaintext to a TLS
+        // port; a plaintext address shipping certs would open TLS to a
+        // plaintext port. Refused when the address came from the package.
+        String err = resolveMustThrow(v6);
+        check(err != null && err.contains("ships no PKCS#12 pair"),
+                "ssl package address without certs refused: " + err);
+        m = ConnectOptions.resolve(null, -1, null, "/flag/client.p12",
+                "/flag/truststore.p12", null, null, v6);
+        check("/flag/client.p12".equals(m.certPath),
+                "ssl package address + explicit --cert/--ca accepted");
+        m = ConnectOptions.resolve("flag.example.test", 8087, null, null, null,
+                null, null, v6);
+        check(m.certPath == null,
+                "explicit --connect bypasses the package proto check");
+        File plainCerts = writeZip(new File(work, "plain-certs.dp"),
+                VALID_PREF.replace("dp.example.test:8089:ssl",
+                        "dp.example.test:8087"),
+                new String[] {"certs/client.p12", "certs/truststore.p12"},
+                new byte[][] {blob, blob});
+        DataPackage.Resolved pc = DataPackage.open(plainCerts,
+                new File(work, "d-plain-certs"));
+        err = resolveMustThrow(pc);
+        check(err != null && err.contains("address is plaintext"),
+                "plaintext package address shipping certs refused: " + err);
+
+        // --- same-basename pair split by a "trust" directory (audit) -----
+        // One entry classifies trust (its path says so), the other client,
+        // yet both extract to the same flat name: refuse, never overwrite.
+        File splitSame = writeZip(new File(work, "split-same.dp"),
+                // no firecrypt file hints: the "trust" path alone classifies
+                VALID_PREF.replace("certs/truststore.p12", "unnamed-ca.p12")
+                        .replace("certs/client.p12", "unnamed-client.p12"),
+                new String[] {"certs/ca.p12", "certs/trust/ca.p12"},
+                new byte[][] {blob, blob});
+        File dSplit = new File(work, "d-split-same");
+        msg = resolveMustFail(splitSame, dSplit);
+        check(msg != null && msg.contains("share one basename"),
+                "same-basename pair split by a trust dir refused: " + msg);
+
+        // --- ClientFile hint outranks the "trust" substring (audit) -----
+        File clientHint = writeZip(new File(work, "client-hint.dp"),
+                VALID_PREF.replace("certs/client.p12", "certs/trusted-ops.p12"),
+                new String[] {"certs/trusted-ops.p12", "certs/truststore.p12"},
+                new byte[][] {blob, blob});
+        DataPackage.Resolved ch = DataPackage.open(clientHint,
+                new File(work, "d-client-hint"));
+        check(ch.certPath != null
+                        && new File(ch.certPath).getName().equals("trusted-ops.p12")
+                        && new File(ch.caPath).getName().equals("truststore.p12"),
+                "ClientFile hint names the client even when it says 'trust'");
+
+        // --- addressN index past int range (audit) ------------------------
+        File hugeIndex = writeZip(new File(work, "huge-index.dp"),
+                "<preferences><preference name=\"cot_streams\">"
+                + "<entry key=\"address99999999999\">h.example:1:tcp</entry>"
+                + "<entry key=\"address1\">ok.example:8087</entry>"
+                + "</preference></preferences>",
+                new String[0], new byte[0][]);
+        DataPackage.Resolved hi = DataPackage.open(hugeIndex,
+                new File(work, "d-huge-index"));
+        check("ok.example".equals(hi.host),
+                "an addressN index past int range is skipped, not a crash");
 
         if (failures == 0) {
             System.out.println("datapackage-selftest: ALL PASS");

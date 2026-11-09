@@ -154,6 +154,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   IDs they use and return neutral values or `TE_Err` instead of calling
   through null.
   (`dev/g1/patches/textformat2-class-init-consumer-guards.patch`)
+- `dev/g1` docs-only cleanup: NOTES §G1.8's audit paragraph now quotes
+  `class_init_audit.py`'s canonical output (post-sweep fully guarded
+  35, not 34; pre-sweep partial 4, not 3; unread clinit callers 23
+  post-sweep, not 25 — the wave-6 entry gates closed 2); the wave-5
+  defensive roster is committed into §G1.7 as a re-derived 27-file
+  enumeration (100 sites on post-wave-6 main, 102 at the wave-5 close —
+  wave-6's `ExceptionClear` hygiene drained `common.cpp` 6→4; both
+  numbers now recorded in `dev/g1/tools/README.md`'s expected-output
+  block); and the F-1 dead `setFocusPointOffset` slot is recorded
+  (`MapRenderer3_init` binds it from a nonexistent `isAnimating(FF)V`
+  and never consumes it — wave-7 deletes it). No code changes.
 
 ## [0.3.1] - 2026-11-07 — G2: window surfaces (M3.0–M3.1) + hardening
 

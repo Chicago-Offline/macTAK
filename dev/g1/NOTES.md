@@ -572,7 +572,49 @@ filter; every planning-roster file appears here). Post-patch: 27 files /
 102 sites, and the eight touched files drain to zero or to the residuals
 below — jglobe 9→0, jglmapview 2→0, ManagedRenderContext 16→0, math
 Interop 2→0, model Interop 4→0, jioproviderfactory 5→0,
-ManagedProjection 9→6, core Interop 5→2.
+ManagedProjection 9→6, core Interop 5→2. (102 is the wave-5-close
+number; wave-6's F15 `ExceptionClear` hygiene in `common.cpp` drained
+two more sites, so the same audit on post-wave-6 main prints 27 files /
+100 sites — see the committed enumeration below.)
+
+### The defensive roster — committed record (post-wave-6 main)
+
+Re-derived 2026-11-08 with `dev/g1/tools/wave5/audit_roster.py` against
+the wave-5
+verify staging (pristine + gdal-drift + all 29 committed g1 patches —
+`gen_patches.py` stages the verify tree on demand; the full recipe is
+`tools/README.md`'s quickstart). 27 files, 100 unguarded sites, the
+standing "defensive / not this wave" list:
+
+```text
+  interop/formats/quantizedmesh/ManagedQMESourceLayer.cpp: 15
+  interop/renderer/ManagedTextFormat2.cpp: 10
+  interop/elevation/ManagedElevationChunk.cpp: 9
+  interop/elevation/ManagedElevationSource.cpp: 9
+  interop/core/ManagedRenderSurface.cpp: 7
+  interop/core/ManagedLayer.cpp: 6
+  interop/core/ManagedProjection.cpp: 6
+  interop/feature/ManagedFeatureDataSource2.cpp: 6
+  common.cpp: 4
+  interop/feature/Interop.cpp: 4
+  interop/core/ManagedMapRenderer2.cpp: 3
+  interop/core/Interop.cpp: 2
+  interop/java/JNIPrimitive.cpp: 2
+  interop/renderer/core/ManagedGLMapRenderable2.cpp: 2
+  jgeocalculations.cpp: 2
+  vsi_jfile.cpp: 2
+  c3dt/jgltf.cpp: 1
+  interop/JNINotifyCallback.cpp: 1
+  interop/core/ManagedVisibilityListener.cpp: 1
+  interop/elevation/Interop.cpp: 1
+  interop/java/JNIPair.cpp: 1
+  interop/java/JNIRunnable.cpp: 1
+  interop/renderer/core/ManagedGLLayer2.cpp: 1
+  interop/util/ManagedDataInput2.cpp: 1
+  jgllinebatch.cpp: 1
+  jnativegllayerspi2.cpp: 1
+  jprojectionfactory.cpp: 1
+```
 
 Report-only residuals (deliberately not patched this wave):
 
@@ -605,15 +647,22 @@ audit/generator/verifier (`class_init_audit.py`, `guard_inits.py`,
 `fix_inline.py`, `gen_patches.py`) live in `/tmp/g1wave6/`.
 
 Audit numbers (live desktop TUs; `c3dt/`, `vsi_jfile.cpp` and
-`jvsijfilefilesystemhandler.cpp` are compiled out and were skipped): 46
-init functions — 42 fully masked (lookups present, zero guards,
-unconditional `return true`), 3 partial (wave-5 enum-section guards
-only), 1 already fully guarded (`jgeocalculations.cpp`, the reference
-shape). 25 `static bool clinit = …` call sites never read their result.
-Post-sweep re-audit on the edited tree: fully guarded 34, the remaining
-partials are counter artifacts (preproc `SET_METHOD_DEFINITION` lines
-counted, but the macros themselves now guard) or deliberate
-`NewWeakGlobalRef` residuals.
+`jvsijfilefilesystemhandler.cpp` are compiled out and were skipped) —
+canonical, re-derivable with `dev/g1/tools/wave6/class_init_audit.py`
+and recorded in `tools/README.md`: pre-sweep tree a — fully masked 42
+(lookups present, zero guards, unconditional `return true`) · partial 4
+(wave-5 enum-section guards only) · fully guarded 1
+(`jgeocalculations.cpp`, the reference shape) · no-lookups 16; 25
+`static bool clinit = …` call sites never read their result. Post-sweep
+tree b — fully masked 2 · partial 11 · fully guarded 35 · no-lookups
+18; unread-result callers 23. The bucket shifts between the trees
+(no-lookups 16→18, partial 4→11) are classifier artifacts of the
+sweep's own edit shapes, not real lookup changes — the audit counts
+guard and lookup lines as they sit in the file, and the macro half
+moved lookups inside `SET_METHOD_DEFINITION` while the hoisted-ID
+rewrites deleted inline ones. (This paragraph's first draft misquoted
+the audit — "46 init functions …, 3 partial …, fully guarded 34";
+corrected to the tool's own output.)
 
 - `jni-class-init-guards.patch` (F14, 27 files) — the sweep: every
   `FindClass`/`Get*ID` assignment in every masked init body now guards
@@ -681,10 +730,25 @@ counted, but the macros themselves now guard) or deliberate
 - Bare `NewWeakGlobalRef` enum-cache results (`ManagedElevationSource`,
   `ManagedFeatureDataSource2`) — the wave-4/5 house style leaves them
   unguarded (null only on OOM); kept consistent.
-- 25 `clinit` results unread at their call sites outside this wave's
-  roster (constructors store the static-local and move on); gating those
-  consumers is the wave-7 item now that the init bodies themselves
-  report failure honestly.
+- 23 `clinit` results still unread at their call sites (25 pre-sweep;
+  the sweep's own F16/F17 entry gates closed 2 — the `GeoPoint` and
+  `NativeProjection` clinit locals in core `Interop` are read now).
+  Gating the remaining consumers is the wave-7 item now that the init
+  bodies themselves report failure honestly.
+- F-1, recorded 2026-11-08, deliberately untouched: `MapRenderer3_init`
+  binds the `setFocusPointOffset` slot from `GetMethodID(…, "isAnimating",
+  "(FF)V")` (`jni-class-init-guards.patch` line 51; pristine
+  `ManagedMapRenderer2.cpp:179`). No Java side has that method —
+  `isAnimating` exists only as `()Z` (inherited from `MapRenderer2`);
+  `(FF)V` is the signature of the inherited
+  `setFocusPointOffset(float,float)` — so the lookup fails at runtime by
+  construction. Dead twice over: the member is declared and bound but
+  never consumed anywhere. The wave-6 guard wraps the failing lookup, so
+  the init reports failure honestly — harmless while nothing drives the
+  modern `MapRenderer3` path, a guaranteed hard-fail of `MapRenderer3_init`
+  the moment G2/G4 wires it. Wave-7 fix: delete the slot (struct member +
+  binding + guard), or bind `"setFocusPointOffset" "(FF)V"` instead if
+  that path turns out to need it.
 - The wave-5 residuals list shrinks by three: scalar getters ×6 (done),
   `Interop_wrap` `NewObject` ×2 (done), systemic class-init masking
   (done); `jnativegllayer3` stays clean.

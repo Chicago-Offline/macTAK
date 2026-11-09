@@ -90,6 +90,11 @@ pristine roster: 34 files with >=1 unguarded JNI call (151 sites)
 patched roster:  27 files (102 sites)
 ```
 
+102 is the wave-5-close number. Wave-6's F15 `ExceptionClear` hygiene in
+`common.cpp` drained two more sites, so on post-wave-6 `main` the same
+run prints `patched roster:  27 files (100 sites)`; the committed
+per-file enumeration lives in `dev/g1/NOTES.md` §G1.7.
+
 The wave-5-touched files drain to zero (e.g. `jglobe.cpp: 9 → 0`,
 `jglmapview.cpp: 2 → 0`); what remains is the defensive roster, and
 `wave5/residuals.py` enumerates it for `NOTES.md`.
@@ -107,7 +112,14 @@ b/: fully masked 2 · partial 11 · fully guarded 35 · no-lookups 18
 `wave6/gen_patches.py` ends with
 `VERIFY OK: replay of gdal + committed + wave-6 patches reproduces tree b
 exactly`; `wave5/gen_patches.py` ends with
-`ALL WAVE-5 PATCHES VERIFIED AGAINST PRISTINE TREE`.
+`ALL WAVE-5 PATCHES VERIFIED AGAINST PRISTINE TREE` — but that verdict
+line needs wave-5's authoring trees `a/`/`b/`, which only exist where
+the wave ran. Wave-6 has `stage_baseline.py` to rebuild its pair from
+the repo alone; wave-5 has no equivalent, and without `a/` the
+assertion half stops at the first `added()` diff (its `pristine()` side
+reads tree `a/`). The verify staging, `audit_roster.py` and
+`residuals.py` all work from the repo alone. Known wave-7 tooling fix:
+give `pristine()` a pristine-engine fallback.
 
 ## Provenance — how this committed copy was validated
 

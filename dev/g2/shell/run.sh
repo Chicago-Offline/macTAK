@@ -65,7 +65,7 @@ exec "$BIN" \
   --lib "$DIST/libtakengine.dylib" \
   --lib "$DIST/libtakenginejni.dylib" \
   --egl "$DIST/libEGL.dylib" --gles "$DIST/libGLESv2.dylib" \
-  --prop "-Djava.library.path=$DIST" \
+  --prop "-Djava.library.path=$DIST:$GDAL_JAVA" \
   --prop "-Djava.awt.headless=true" \
   --prop "-Dmactak.gdal.data=$GDAL_DATA_DIR" \
   --prop "-Dorg.slf4j.simpleLogger.defaultLogLevel=${MACTAK_LOG_LEVEL:-warn}" \

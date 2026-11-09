@@ -48,9 +48,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `dev/g2/NOTES.md` §G2.4b): it flips — `GdalLibrary` needs
   `OAMS_TRADITIONAL_GIS_ORDER` (b.2). Runs in CI's `render-angle` job;
   Brewfile + lock gain `swig`.
+- G2.4 b.2 — `make test-gdal-projection` (`dev/g2/render/run-gdal-projection.sh`,
+  `GdalProjectionSmoke`): the engine's own `GdalLibrary.init()` +
+  `GdalDatasetProjection2.getInstance` on a GeoTIFF, GDAL 3, with the
+  axis-order patch in effect; pixel ↔ ground round-trips exactly. CI
+  `render-angle` runs it after `gdal-java`. `make check-engine-shadows`
+  now handles one patch spanning several shadows.
 
 ### Fixed
 
+- GDAL 3 axis order (trap #48): `GdalLibrary.EPSG_4326` and every dataset
+  SRS `GdalDatasetProjection2` transforms through are pinned to
+  `OAMS_TRADITIONAL_GIS_ORDER` via a new `GdalLibrary.traditionalGisOrder`
+  helper, so the engine's `TransformPoint(lon, lat)` calls (written for
+  GDAL 2.x) georeference correctly on GDAL ≥ 3; previously
+  `(Infinity, Infinity)`. Engine Java patch + shadows
+  (`dev/g1/patches/gdal3-axis-order-traditional-gis.patch`). Also: the
+  render classpath puts `gdal.jar` ahead of `android-port-3.1.0.jar`, whose
+  GDAL 2.4-era `org.gdal` copy was the real source of trap 17's
+  `UnsatisfiedLinkError` (trap #49); `GdalLibrary.init()` still stops at the
+  excluded VSI filesystem-handler native (trap #50, b.1).
 - JNI layer bridge: a Java exception thrown inside a `GLLayer3` callback no
   longer poisons the render thread. `ManagedGLLayer2` now reports (once) and
   clears exceptions thrown by `getSubject()`, `draw()`, `release()`,

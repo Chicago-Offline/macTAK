@@ -56,7 +56,7 @@ fi
 
 "$JDK/bin/java" \
   -classpath "$OUT:$CP" \
-  -Djava.library.path="$DIST" \
+  -Djava.library.path="$DIST:$GDAL_JAVA" \
   -Djava.awt.headless=true \
   -Dmactak.gdal.data="$GDAL_DATA_DIR" \
   -Dorg.slf4j.simpleLogger.defaultLogLevel="${MACTAK_LOG_LEVEL:-warn}" \

@@ -895,41 +895,75 @@ the pre-audit `DataPackage`/`ConnectOptions`, they fail (A/B checked).
 Covers the `dev/g1/` files §G1.10 didn't reach: `TrackStore`, `LayerCLI`,
 `CotXml` (split out by the CoT canary), `run.sh`, the `atak-headless`
 launcher, `fake-cot-server.py`, `smoke/`, `jni-tests/run.sh`, `jni-extra/`,
-`gen-jni-headers.sh` and the test scripts. Fixed:
+`gen-jni-headers.sh` and the test scripts. Every fix is in
+`dev/g1/headless/`; no engine patch changed.
 
-- `CotEvent` — `<point lat lon>` must be present, a plain CoT decimal,
-  finite and within ±90/±180. Before, a missing or `NaN`/`Infinity` lat/lon
-  parsed as NaN/∞ and was persisted. sqlite keeps `"NaN"` as text in a REAL
-  column and a numeric read of it is 0.0, so the track plotted at 0,0.
-  `Double.parseDouble` also took `45f`, `0x1p5` and padded values. These
-  are refused now, for hae/ce/le too. hae/ce/le stay optional: absent or
-  `NaN` means unknown.
-- `TrackStore` — an unknown `hae` binds SQL NULL (`NULLIF(?, '')`, like the
-  callsign) and reads back as NaN. It used to be stored as `"NaN"` text and
-  read back as 0.0 m.
-- `CotXml.xmlEscape` — tab/LF/CR become character references. In an
-  attribute a parser turns them into spaces. Other C0 controls, U+FFFE/FFFF
-  and unpaired surrogates become U+FFFD. Before, one BEL in a callsign made
-  every presence and marker unparseable.
-- `HeadlessCLI` — every exit path called `System.exit` inside the `try` or
-  a `catch`. That never returns, so the `finally` that closes the tracks DB
-  never ran on a failure. The exit code is now computed in the `try` and
-  `System.exit` runs once, after the `finally`.
-- `run.sh` — the wait for A's iface-up checks whether A is still alive. If
-  A exits first (connect refused, bad cert, native load), the script now
-  fails at once with A's exit code. Before, it waited the full 90 s.
+Traps found on the way (do not rediscover these):
 
-`CotEventSelfTest` gains 13 assertions: 9 for the `<point>` numbers, 3 for
-xmlEscape and a presence round-trip with control characters. 12 fail
-against main's `CotEvent`/`CotXml`. The 13th, an inclusive-bounds case,
-passes on both, so the new checks don't over-reject. The control-character
-case shows main's presence builder emitting XML its own parser rejects
-(A/B checked). The `TrackStore` statements were
-checked against sqlite directly; they need the engine dylibs to run in
-process.
+- **sqlite keeps `"NaN"` as text in a REAL column, and a numeric read of
+  it is 0.0.** The engine's `DatabaseImpl` binds Strings only, so
+  `TrackStore.record` bound `Double.toString(NaN)`. A CoT `<point>` with
+  no `lat`/`lon` parsed as NaN and read back from the tracks DB as 0,0;
+  an absent `hae` read back as 0.0 m. Witness, Python's sqlite3 on the
+  same column types: `('NaN', 'text', … , 0.0)`. **Guard:**
+  `CotEvent.parse` refuses a `<point>` without a finite, in-range
+  lat/lon (`<point> has no lat`, `… is out of range`); `TrackStore` binds
+  an unknown `hae` through `NULLIF(?, '')` (SQL NULL) and reads NULL back
+  as NaN. Pinned by `CotEventSelfTest` (9 `<point>` assertions).
+- **`Double.parseDouble` is not a CoT number parser.** It also takes
+  `45f`, `12d`, `0x1p5`, padded `" 1 "` and `Infinity`, which no other
+  CoT parser reads. §G1.10 normalized these on the send side
+  (`CotXml.coordinate`); the receive side still took them. **Guard:**
+  `CotEvent` matches a plain decimal grammar before parsing
+  (`<point> lat=45f is not a number`); only hae/ce/le may also be the
+  literal `NaN` (unknown).
+- **Escaping `& < > ' "` doesn't make a string safe for XML 1.0.** Any
+  other C0 control character can't appear in a document at all, even
+  as a character reference. One BEL in a callsign made every presence
+  and marker unparseable: `An invalid XML character (Unicode: 0x7) was
+  found in the value of attribute "callsign"`. Tab/LF/CR are legal but
+  a parser normalizes them to spaces inside an attribute. **Guard:**
+  `CotXml.xmlEscape` writes tab/LF/CR as `&#9;`/`&#10;`/`&#13;` and
+  replaces other C0 controls, U+FFFE/U+FFFF and unpaired surrogates with
+  U+FFFD; `CotEventSelfTest` round-trips a control-character callsign
+  through `CotXml.presence` → `CotEvent.parse`.
+- **`System.exit` inside a `try` skips its `finally`.** `HeadlessCLI`
+  exited from the `try` and from both `catch` blocks, so the `finally`
+  that closes the tracks DB never ran on a failure path; it was dead
+  code. **Guard:** the exit code is computed in the `try`/`catch` and
+  `System.exit` runs once, after the `finally`. No automated pin: the
+  path needs commo and the engine dylibs (CI's hermetic round-trip
+  covers the success path).
+- **`run.sh` couldn't tell a dead client A from a slow one.** It
+  polled A's log for `iface-up` for the full 90 s even when A had
+  already exited (connect refused, bad cert, native load). **Guard:**
+  each poll also checks `kill -0 "$pid_a"`, and a dead A that never
+  logged `iface-up` fails at once with A's exit code.
 
-Reviewed, no change needed: `LayerCLI`/`LayerStore` argument handling,
-`fake-cot-server.py` framing (test fixture only: a non-blocking `sendall`
-that hits a full peer buffer drops that client), the smoke and jni-tests
-runners, the `jni-extra` shims (null-checked UTF chars, providers loaded
-once), and `gen-jni-headers.sh`.
+Reviewed, no change needed: `LayerCLI`/`LayerStore` argument handling;
+the smoke and jni-tests runners; the `jni-extra` shims (null-checked
+UTF chars, each OpenSSL provider loaded once); `gen-jni-headers.sh`.
+`fake-cot-server.py` has one test-fixture-only quirk: a non-blocking
+`sendall` that hits a full peer buffer drops that client.
+
+Evidence (this box, JDK 21; `make test-roundtrip` and `layer.sh` need
+the dev Mac and are left to CI and a local run):
+
+```text
+$ bash dev/g1/headless/test/cot.sh
+PASS: missing lat refused: <point> has no lat
+PASS: Java-only number forms (45f, 0x1p5) refused: <point> lat=45f is not a number
+cot-selftest: ALL PASS
+
+# A/B: the same CotEventSelfTest against main's CotEvent/CotXml
+FAIL: missing lat refused: null
+FAIL: xmlEscape replaces characters XML 1.0 cannot carry
+[Fatal Error] :2:4: An invalid XML character (Unicode: 0x7) was found in the value of attribute "callsign" and element is "contact".
+```
+
+12 of the 13 new assertions fail against main. The 13th, inclusive
+range bounds, passes on both, so the new checks don't over-reject.
+Compile gate: the launcher's file set under `-source 8 -Xlint:all
+-Werror` (plus `-Xlint:-options` on JDK 21) compiled 22 classes against
+commo's API from the pin and the transplant jars. `datapackage.sh`:
+`datapackage-selftest: ALL PASS`. shellcheck and markdownlint: 0 issues.

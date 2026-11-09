@@ -761,20 +761,21 @@ MBTiles basemap), `make test-render-window` PASS (bare + layer,
 patches + the 11 wave-6 patches onto a pristine engine copy in glob
 order and asserts the JNI tree equals the edited tree byte-for-byte.
 
-## G1.9 — correctness audit (2026-11-09, branch `audit/g1-correctness`)
+## G1.10 — correctness audit (2026-11-09, branch `audit/g1-correctness`)
 
 A bugs-and-correctness pass over everything under `dev/g1/` plus the
 engine code its patches touch. Fixed on the branch:
 
-- `stlvectoradapter-bind-contents.patch` (new) — four engine sites
-  default-construct `STLVectorAdapter<String> contents_w` and hand it to
-  `listFiles`, then loop over a separate, never-filled
-  `std::vector contents`: `IOProviderFactoryProxy::getFileCount` and
-  `::length` (jni), `atakmap::util::getDirContents` (IO.cpp) and the
-  filtered `IO_listFiles` (IO2.cpp) all saw every directory as empty. F12
-  made `getFileCount`'s directory branch reachable, but it still
-  returned 0; `PersistentRasterDataStore`'s large-dataset probe goes
-  through it (G2.4). The fix binds the adapter: `contents_w(contents)`.
+- `stlvectoradapter-bind-contents.patch` (new) — the same unbound
+  `STLVectorAdapter` bug G1.9's `ioproviderfactory-listfiles-adapter-bind.patch`
+  fixed in the jni proxy, at its two core-engine sites:
+  `atakmap::util::getDirContents` (IO.cpp) and the filtered `IO_listFiles`
+  (IO2.cpp). Each default-constructed `contents_w`, handed it to
+  `listFiles`, then looped over a separate, never-filled `std::vector
+  contents`, so every directory came back empty. The fix binds the
+  adapter: `contents_w(contents)`. The jni hunks were dropped from this
+  patch in favour of G1.9's; the series applies at `--fuzz=0` with or
+  without it.
 - `megatexture-sharetile-comma-operator.patch` regenerated — its hunk
   header claimed 6 lines for a 7-line hunk, so it only ever applied with
   fuzz 1. `build-native.sh`/`build-commo.sh` now patch with `--fuzz=0`,

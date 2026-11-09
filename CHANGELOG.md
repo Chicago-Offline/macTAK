@@ -57,9 +57,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- G1 correctness audit (`dev/g1/NOTES.md` §G1.9): engine directory
-  listings no longer come back empty. Four sites passed an unbound
-  `STLVectorAdapter` to `listFiles`; fixed by the new
+- G1 correctness audit (`dev/g1/NOTES.md` §G1.10): `getDirContents` and
+  the filtered `IO_listFiles` no longer return empty listings. They passed
+  an unbound `STLVectorAdapter` to `listFiles`, the core-engine twin of the
+  jni-proxy bug G1.9 fixed; fixed by the new
   `dev/g1/patches/stlvectoradapter-bind-contents.patch`. Engine patches now
   apply with `--fuzz=0`, and the megatexture patch, which had only ever
   applied with fuzz, is regenerated. The build scripts' EXIT trap no longer

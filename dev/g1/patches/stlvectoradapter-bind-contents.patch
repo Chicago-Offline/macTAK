@@ -26,29 +26,3 @@
      code = filesystem->listFiles(contents_w, path);
      TE_CHECKRETURN_CODE(code);
      if(contents.empty())
---- a/tmp/takeng-src/jni/jioproviderfactory.cpp
-+++ b/tmp/takeng-src/jni/jioproviderfactory.cpp
-@@ -199,7 +199,10 @@
-         code = this->isDirectory(&b, path);
-         if(b) {
-             std::vector<TAK::Engine::Port::String> contents;
--            TAK::Engine::Port::STLVectorAdapter<TAK::Engine::Port::String> contents_w;
-+            // macTAK (G1): bind the adapter to `contents`. Default-constructed it
-+            // owns a private vector: listFiles filled that, and the loop below
-+            // always saw an empty `contents`.
-+            TAK::Engine::Port::STLVectorAdapter<TAK::Engine::Port::String> contents_w(contents);
-             code = this->listFiles(contents_w, path);
-             TE_CHECKRETURN_CODE(code);
- 
-@@ -287,7 +290,10 @@
-         code = this->isDirectory(&b, path);
-         if(b) {
-             std::vector<TAK::Engine::Port::String> contents;
--            TAK::Engine::Port::STLVectorAdapter<TAK::Engine::Port::String> contents_w;
-+            // macTAK (G1): bind the adapter to `contents`. Default-constructed it
-+            // owns a private vector: listFiles filled that, and the loop below
-+            // always saw an empty `contents`.
-+            TAK::Engine::Port::STLVectorAdapter<TAK::Engine::Port::String> contents_w(contents);
-             code = this->listFiles(contents_w, path);
-             TE_CHECKRETURN_CODE(code);
- 

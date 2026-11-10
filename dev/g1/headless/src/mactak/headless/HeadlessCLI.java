@@ -291,10 +291,10 @@ public final class HeadlessCLI {
 
             commo.addContactPresenceListener(new ContactPresenceListener() {
                 public void contactAdded(Contact c) {
-                    System.out.println("headless: contact-added " + c.contactUID);
+                    System.out.println("headless: contact-added " + CotXml.printable(c.contactUID));
                 }
                 public void contactRemoved(Contact c) {
-                    System.out.println("headless: contact-removed " + c.contactUID);
+                    System.out.println("headless: contact-removed " + CotXml.printable(c.contactUID));
                 }
             });
 
@@ -302,8 +302,10 @@ public final class HeadlessCLI {
                     new com.atakmap.commoncommo.CoTMessageListener() {
                 public void cotMessageReceived(String cotMessage, String rxEndpointId) {
                     received.incrementAndGet();
+                    // Server-supplied bytes: whitespace collapsed to keep one line per
+                    // message, then every other control made visible (G1.14 #3).
                     System.out.println("headless: cot-received " + (cotMessage == null
-                            ? "" : cotMessage.replaceAll("\\s+", " ").trim()));
+                            ? "" : CotXml.printable(cotMessage.replaceAll("\\s+", " ").trim())));
                     if (cotMessage == null || done.get()) return;
                     try {
                         final CotEvent e = CotEvent.parse(cotMessage);
@@ -312,7 +314,7 @@ public final class HeadlessCLI {
                         fTracks.record(e, System.currentTimeMillis());
                         persisted.incrementAndGet();
                     } catch (Exception e) {
-                        System.out.println("headless: cot-unparsed " + e.getMessage());
+                        System.out.println("headless: cot-unparsed " + CotXml.printable(e.getMessage()));
                     }
                 }
             });

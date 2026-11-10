@@ -84,10 +84,19 @@ public final class CotEvent {
                 callsign);
     }
 
+    /**
+     * One display line. Every string field is server-supplied, and XML lets
+     * an attribute carry controls (a {@code &#10;} newline, C1 such as the
+     * 8-bit CSI), so each passes through {@link CotXml#printable} on its
+     * own: a callsign can neither break the line nor drive the terminal
+     * (G1.14, security audit #3).
+     */
     @Override
     public String toString() {
         return String.format(Locale.US, "uid=%s type=%s callsign=%s lat=%.6f lon=%.6f time=%s",
-                uid, type, callsign == null ? "-" : callsign, lat, lon, time);
+                CotXml.printable(uid), CotXml.printable(type),
+                callsign == null ? "-" : CotXml.printable(callsign), lat, lon,
+                CotXml.printable(time));
     }
 
     /** The first direct child element of parent named tag, or null. */

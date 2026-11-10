@@ -71,6 +71,26 @@ static void *bufferAcquire(JNIEnv *env, jobject buf, int elem, BufRef *ref)
     return ref->elems ? (char *)ref->elems + (size_t)(off + pos) * (size_t)elem : NULL;
 }
 
+/* A Buffer whose pointer GL keeps after the call returns (vertex attribute
+ * arrays). Only a direct Buffer has a stable address: bufferAcquire's copy
+ * of a backing array is freed by bufferRelease, which would leave GL a
+ * dangling pointer at draw time. Android throws IllegalArgumentException
+ * for a non-direct Buffer here; so does this. */
+static void *bufferDirect(JNIEnv *env, jobject buf, int elem)
+{
+    if (!buf) return NULL;
+    initBuffer(env);
+    if (!(*env)->CallBooleanMethod(env, buf, mid_isDirect)) {
+        (*env)->ThrowNew(env, (*env)->FindClass(env, "java/lang/IllegalArgumentException"),
+                         "Must use a native order direct Buffer");
+        return NULL;
+    }
+    if (elem == 0) elem = bufferElemSize(env, buf);
+    jint pos = (*env)->CallIntMethod(env, buf, mid_position);
+    char *base = (char *)(*env)->GetDirectBufferAddress(env, buf);
+    return base ? base + (size_t)pos * (size_t)elem : NULL;
+}
+
 static void bufferRelease(JNIEnv *env, BufRef *ref)
 {
     if (!ref->arr || !ref->elems) return;
@@ -1546,9 +1566,10 @@ JNIEXPORT void JNICALL Java_android_opengl_GLES20_glVertexAttribPointer__IIIZII(
 JNIEXPORT void JNICALL Java_android_opengl_GLES20_glVertexAttribPointer__IIIZILjava_nio_Buffer_2(JNIEnv *env, jclass cls, jint a0, jint a1, jint a2, jboolean a3, jint a4, jobject a5)
 {
     if (a0 < 0) { attribMinusOne(env, "glVertexAttribPointer"); return; }
-    BufRef b5; void *p5 = bufferAcquire(env, a5, 0, &b5);
+    void *p5 = bufferDirect(env, a5, 0);
+    if ((*env)->ExceptionCheck(env)) return;
     (attribIsInteger((GLuint)a0) ? glVertexAttribIPointer((GLuint)a0, (GLint)a1, signedTwin((GLenum)a2), (GLsizei)a4, (const void *)(uintptr_t)p5) : glVertexAttribPointer((GLuint)a0, (GLint)a1, (GLenum)a2, (GLboolean)a3, (GLsizei)a4, (const void *)(uintptr_t)p5));
-    bufferRelease(env, &b5);
+
 }
 
 JNIEXPORT void JNICALL Java_android_opengl_GLES20_glViewport__IIII(JNIEnv *env, jclass cls, jint a0, jint a1, jint a2, jint a3)
@@ -1985,9 +2006,10 @@ JNIEXPORT void JNICALL Java_android_opengl_GLES30_glGetTransformFeedbackVarying_
 JNIEXPORT void JNICALL Java_android_opengl_GLES30_glVertexAttribIPointer__IIIILjava_nio_Buffer_2(JNIEnv *env, jclass cls, jint a0, jint a1, jint a2, jint a3, jobject a4)
 {
     if (a0 < 0) { attribMinusOne(env, "glVertexAttribIPointer"); return; }
-    BufRef b4; void *p4 = bufferAcquire(env, a4, 0, &b4);
+    void *p4 = bufferDirect(env, a4, 0);
+    if ((*env)->ExceptionCheck(env)) return;
     glVertexAttribIPointer((GLuint)a0, (GLint)a1, (GLenum)a2, (GLsizei)a3, (const void *)(uintptr_t)p4);
-    bufferRelease(env, &b4);
+
 }
 
 JNIEXPORT void JNICALL Java_android_opengl_GLES30_glVertexAttribIPointer__IIIII(JNIEnv *env, jclass cls, jint a0, jint a1, jint a2, jint a3, jint a4)

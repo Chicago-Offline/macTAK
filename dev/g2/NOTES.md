@@ -1066,7 +1066,7 @@ fixed on its own branch, in this order.
 |---|---|---|---|
 | 1 | High | The basemap leg of the render smoke could not fail: it passed on "content pixels > 0", which the vector layer alone satisfies | **Fixed here**: `ContentGate`, guarded by `render/test/basemap-gate.sh` |
 | 2 | Medium | `android.net.Uri.fromFile` does not encode the path: `#` and `?` truncate it, `%XX` is decoded. The engine opens its databases through it (13 call sites) | **Fixed** (branch `g2/uri-fromfile-encoding`): `fromFile` encodes like Android, guarded by `render/test/uri.sh` |
-| 3 | Medium (latent) | The GLES shim's `glVertexAttribPointer` accepts an array-backed `Buffer`: GL keeps a pointer into a copy that `bufferRelease` frees. Android rejects non-direct buffers there | Open |
+| 3 | Medium (latent) | The GLES shim's `glVertexAttribPointer` accepts an array-backed `Buffer`: GL keeps a pointer into a copy that `bufferRelease` frees. Android rejects non-direct buffers there | **Fixed** (branch `g2/gles-shim-direct-buffers`): `bufferDirect` in the generator, guarded by `render/test/gles-shim.sh` |
 | 4 | Low | `Uri.getQueryParameter` leaves `+` as `+`; Android decodes it to a space | Open |
 | 5 | Low | `shell/run.sh` leaks its scratch `MACTAK_HOME` every run: the `EXIT` trap never fires after `exec` | Open |
 | 6 | Low | A value option given last crashes the Swift shell (array index out of range); `RenderSmoke` dies with a stack trace instead of usage | Open |
@@ -1108,6 +1108,24 @@ Traps found on the way (continuing G2 numbering):
   escaped `!~'()`). `render/test/uri.sh` (pure JDK; CI's JVM job) pins
   seven round-trip paths, the encoded string, `encode`/`decode`, and the
   `parse` behaviour the engine already relied on.
+- **#53 — a vertex-array pointer outlives the JNI call.** The generated
+  shim ran every `Buffer` argument through `bufferAcquire` /
+  `bufferRelease`: a direct buffer gives its address, an array-backed
+  one a `Get<Type>ArrayElements` copy that is released after the GL
+  call. That is right for calls that consume their data before
+  returning (`glBufferData`, `glTexImage2D`), and wrong for
+  `glVertexAttribPointer` / `glVertexAttribIPointer`: GL stores the
+  pointer and reads through it at draw time, by which point the copy is
+  freed. Android refuses a non-direct `Buffer` there
+  (`IllegalArgumentException: Must use a native order direct Buffer`).
+  The engine's renderers allocate direct buffers, so nothing hit this;
+  the shim accepted quietly what Android rejects. **Guard:**
+  `gen-gles-shim.py` routes `RETAINED_POINTER_FUNCS` through
+  `bufferDirect`, which throws the same exception before any GL call.
+  `render/test/gles-shim.sh` (`GlesShimSelfTest`, CI render job and
+  `make test-render`) pins it on a 16x16 ANGLE pbuffer: both entry
+  points refuse an array-backed buffer, accept a direct one and `null`,
+  and `glBufferData` still takes an array-backed one.
 
 Evidence for #1 (CI, render job, ANGLE Metal on a hosted runner).
 Before: the canary alone on `be59312`, old gate (dispatch run

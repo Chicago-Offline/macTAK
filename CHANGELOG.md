@@ -78,6 +78,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The GLES shim refuses an array-backed `Buffer` for vertex arrays
+  (`dev/g2/NOTES.md` §G2.5, trap #53, G2 correctness audit #3).
+  `glVertexAttribPointer` and `glVertexAttribIPointer` passed GL a
+  pointer into a temporary copy of the backing array and then freed
+  the copy, leaving GL a dangling pointer at draw time. They now throw
+  `IllegalArgumentException`, as Android does; `gen-gles-shim.py` emits
+  `bufferDirect` for those two entry points and `mactak_gles.c` is
+  regenerated. `dev/g2/render/test/gles-shim.sh` (CI render job,
+  `make test-render`) pins the contract.
+
 - `Uri.fromFile` round-trips any path (`dev/g2/NOTES.md` §G2.5, trap
   #52, G2 correctness audit #2). The macOS `android.net.Uri` stand-in
   built `file://` URIs from the raw path, so a `#` or `?` in a folder

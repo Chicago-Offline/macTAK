@@ -81,7 +81,9 @@ Run the affected gates before pushing; CI will re-run the ones it can.
   government-off-the-shelf material stay gitignored (e.g. under
   `dev/reference/`).
 - **Binaries carry proof.** Jars are committed only under `transplants/` with
-  a `SHA256SUMS` manifest; the pre-commit hook verifies them. External
+  a `SHA256SUMS` manifest that lists every jar; `dev/check-transplants.sh`
+  verifies them (pre-commit hook, `make check-transplants`, and CI's lint
+  job on every PR), and an unlisted jar fails it. External
   downloads (ANGLE) are SHA256-pinned in `dev/g2/fetch-angle.sh`, which
   writes `PROVENANCE.txt`.
 

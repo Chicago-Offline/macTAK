@@ -291,6 +291,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- atak-headless escapes control characters in server-supplied output
+  (`dev/g1/NOTES.md` §G1.14, G1 security audit #3). `headless:
+  cot-received` printed a hostile server's ESC/BEL/C1 bytes straight to
+  the terminal. The track summary printed parsed attributes, so a callsign
+  carrying `&#10;` could forge a second `headless: track` line, one of
+  the lines `run.sh` greps as evidence. `CotXml.printable` makes C0, DEL
+  and C1 controls visible as `\xNN`. `HeadlessCLI` uses it for
+  received CoT, contact uids and parse errors, and `CotEvent.toString`
+  uses it per field. Pinned by six new `CotEventSelfTest` checks
+  (`test/cot.sh`).
 - commo TLS: the server certificate must now be fit for a TLS *server*
   (`dev/g1/NOTES.md` §G1.14, G1 security audit #1, High). Commo verified
   only that the server's certificate chained to the truststore CA, and

@@ -1153,7 +1153,7 @@ and its password. Six findings; each lands as its own focused PR.
 |---|---|---|---|
 | 1 | High | commo accepts any server cert that chains to the truststore CA: no TLS-server purpose check, and no hostname check (deliberate upstream, per ATAK) | **Fixed** (branch `g1/commo-tls-server-purpose`): `patches/commo/0002-sslcertchecker-require-server-purpose.patch`, guarded by `test/tls-purpose.sh` |
 | 2 | Medium | Transplant jars not fully integrity-checked: slf4j jars unlisted, CI never verified hashes | **Fixed here** |
-| 3 | Low | Inbound CoT printed raw to the terminal: escape-sequence injection | Fix in a follow-up PR |
+| 3 | Low | Inbound CoT printed raw to the terminal: escape-sequence injection, and forged `headless:` lines | **Fixed** (branch `g1/sanitize-inbound-log`): `CotXml.printable`, guarded by `CotEventSelfTest` |
 | 4 | Low (dormant) | commo's curl paths (file transfer, mission packages, URL requests) set `VERIFYPEER`/`VERIFYHOST` to 0 | Recorded below; unused by atak-headless today |
 | 5 | Note | `NativeSsl` loads OpenSSL's legacy provider process-wide, not only for the RC2-40 PKCS#12 read | Recorded |
 | 6 | Note | Reviewed, no issue: data-package importer (Zip-Slip, size caps, XXE, no password in logs, 0700 cert dir), `CotEvent` (XXE + §G1.11 validation), `TrackStore` (bound parameters), fake server (loopback only) | — |
@@ -1205,6 +1205,31 @@ Traps found on the way (do not rediscover these):
   worked before the patch, and the real server stays reachable after it.
   A live run against an OpenTAKServer is still worth doing when one is
   next stood up; no server was available on 2026-11-10.
+- **atak-headless printed server-supplied text raw.** `headless:
+  cot-received` collapsed only whitespace, so ESC, BEL and C1 sequences
+  from a hostile server reached the terminal, where they can rewrite
+  earlier output or retitle the window. Worse, `CotEvent.toString` (the
+  track summary) printed parsed attributes, and XML lets an attribute
+  carry a real newline (`&#10;`) or a C1 control. On main, a callsign
+  `EVIL&#10;headless: track uid=forged …` prints a second, forged
+  `headless: track` line, and those are the lines `run.sh` greps as test
+  evidence:
+
+  ```text
+  headless: track uid=u-1 type=t callsign=EVIL
+  headless: track uid=forged type=a-f-G-U-C callsign=FORGED lat=0 lon=0 lat=1.000000 lon=2.000000 time= fixes=1
+  ```
+
+  **Guard:** `CotXml.printable` turns C0 controls, DEL and C1
+  (U+0080–U+009F, including the 8-bit CSI) into a visible `\xNN` and
+  leaves other text, non-ASCII included, alone. `HeadlessCLI` runs it
+  on `cot-received` (after the whitespace collapse), contact uids and
+  `cot-unparsed` messages; `CotEvent.toString` runs it per field, so a
+  track stays on one line. Escaping per field is deliberate: escaping
+  the whole summary and restoring its line breaks would let a callsign
+  holding the literal text `\x0a` forge a line all over again.
+  `CotEventSelfTest` pins six cases, among them that exact callsign:
+  `callsign=EVIL\x0aheadless: track uid=forged\x9b31m`, one line.
 - **commo's HTTP paths turn TLS verification off** (dormant): ATAK-CIV's
   `simplefileiomanager.cpp`, `missionpackagemanager.cpp` and
   `urlrequestmanager.cpp` set `CURLOPT_SSL_VERIFYPEER`/`VERIFYHOST` to

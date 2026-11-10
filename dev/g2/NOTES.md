@@ -1235,3 +1235,32 @@ then a command that exits 3): with `exec`, exit 3 and the directory is
 left behind; without it, exit 3 and the directory is gone. The shell
 itself needs a GUI session, so `make test-shell` on a dev Mac is the
 end-to-end check.
+
+Evidence for #6 (CI). Before: both canaries alone on `de21c83`
+(dispatch run 42919313174). The shell traps for 14 of its 15 value
+options; only `--classpath`, the one with a bounds check, passes:
+
+```text
+[shell-args] ok   --classpath
+dev/g2/shell/test/args.sh: line 16:  1594 Trace/BPT trap: 5       "$BIN" "$opt" > /dev/null 2> "$ERR"
+[shell-args] FAIL --lib: exit 133, expected 2 with '--lib needs a value'
+[shell-args] FAIL --out: exit 133, expected 2 with '--out needs a value'
+```
+
+and all six `RenderSmoke` cases end in a stack trace:
+
+```text
+[render-args] FAIL --frames: exit 1, expected 2 with '--frames needs a value' and no stack trace
+    Exception in thread "main" java.lang.ArrayIndexOutOfBoundsException: 9
+[render-args] FAIL --frames many: exit 1, expected 2 with 'bad --frames' and no stack trace
+    Exception in thread "main" java.lang.NumberFormatException: For input string: "many"
+```
+
+After: with the fixes, on `8be7765` (PR #93, run 42919519530):
+
+```text
+[shell-args] ok   --out
+[shell-args] PASS: every value option reports a missing value
+[render-args] ok   --frames many
+[render-args] PASS: bad arguments end in usage, exit 2
+```

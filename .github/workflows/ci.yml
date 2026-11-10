@@ -532,7 +532,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m py_compile dev/reference/tools/*.py
-          rm -rf dev/reference/tools/__pycache__
+          python3 -m py_compile dev/check-ots-profiles.py
+          rm -rf dev/reference/tools/__pycache__ dev/__pycache__
           # shellcheck disable=SC2016  # the quoted string is PowerShell code, not shell
           pwsh -NoProfile -Command '
             $errs = $null

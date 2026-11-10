@@ -1209,8 +1209,18 @@ Traps found on the way (do not rediscover these):
   (OpenSSL 3): `ots-server` ACCEPT before and after; `ots-client` ACCEPT
   before, REJECT (26) after. So on a stock OpenTAKServer the attack
   worked before the patch, and the real server stays reachable after it.
-  A live run against an OpenTAKServer is still worth doing when one is
-  next stood up; no server was available on 2026-11-10.
+  CI now proves the same through real commo: `tls-purpose.sh` signs two
+  more leaves with those profiles, read from
+  `test/fixtures/ots-cert-profiles.cnf`, and requires `ots-server` to
+  connect and `ots-client` to be refused. The copy can go stale, so
+  `dev/check-ots-profiles.py` compares it with upstream's `ca_config.py`
+  (every `[ client ]` and `[ server ]` occurrence; the server template's
+  `subjectAltName` is ignored because commo never checks the hostname).
+  It runs nightly in `ots-profile-drift.yml`, not as a PR gate: a red
+  run means upstream changed. It reads one text file and runs nothing of
+  OpenTAKServer's. A live run against an OpenTAKServer is still worth
+  doing when one is next stood up, for the handshake as a whole; no
+  server was available on 2026-11-10.
 - **atak-headless printed server-supplied text raw.** `headless:
   cot-received` collapsed only whitespace, so ESC, BEL and C1 sequences
   from a hostile server reached the terminal, where they can rewrite

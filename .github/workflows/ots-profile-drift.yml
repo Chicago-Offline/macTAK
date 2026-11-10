@@ -1,0 +1,40 @@
+# OpenTAKServer certificate-profile drift check.
+#
+# dev/g1/headless/test/tls-purpose.sh proves commo accepts an OpenTAKServer
+# server certificate and refuses a user certificate (G1.14 #1), using the
+# profiles pinned in dev/g1/headless/test/fixtures/ots-cert-profiles.cnf.
+# This job downloads upstream's opentakserver/ca_config.py and fails when
+# its [ client ] / [ server ] sections no longer match the pinned copy, so
+# the proof cannot go stale unnoticed. It reads one text file and runs
+# nothing of OpenTAKServer's.
+#
+# Nightly, not a PR gate: a red run means upstream changed, which no pull
+# request here caused. It also runs on a PR that touches the check itself.
+name: OTS profile drift
+
+on:
+  schedule:
+    - cron: '17 7 * * *'   # 07:17 UTC daily
+  pull_request:
+    paths:
+      - 'dev/check-ots-profiles.py'
+      - 'dev/g1/headless/test/fixtures/ots-cert-profiles.cnf'
+      - '.github/workflows/ots-profile-drift.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ots-profile-drift:
+    name: OpenTAKServer cert profiles match the pinned copy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out macTAK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compare upstream ca_config.py with the pinned profiles
+        run: python3 dev/check-ots-profiles.py

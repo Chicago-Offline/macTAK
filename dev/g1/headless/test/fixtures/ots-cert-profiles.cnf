@@ -1,0 +1,19 @@
+# OpenTAKServer's certificate profiles: the active lines of the [ client ]
+# and [ server ] sections of opentakserver/ca_config.py (upstream master,
+# copied 2026-11-10). test/tls-purpose.sh signs one leaf with each and
+# requires commo to accept the server and refuse the client (G1.14 #1).
+# dev/check-ots-profiles.py fails when upstream no longer matches this file
+# (nightly, .github/workflows/ots-profile-drift.yml).
+#
+# Not copied: the server template's subjectAltName. commo never checks the
+# hostname, so it cannot change either verdict.
+
+[ client ]
+basicConstraints=critical,CA:FALSE
+keyUsage=critical, digitalSignature, keyEncipherment
+extendedKeyUsage = critical, clientAuth
+
+[ server ]
+basicConstraints=critical,CA:FALSE
+keyUsage=critical, digitalSignature, keyEncipherment
+extendedKeyUsage = critical, clientAuth, serverAuth

@@ -890,7 +890,7 @@ engine code its patches touch. Fixed on the branch:
 `DataPackageSelfTest` gains seven assertions for the above. Run against
 the pre-audit `DataPackage`/`ConnectOptions`, they fail (A/B checked).
 
-## G1.11 — correctness audit, pass 2 (2026-11-09)
+## G1.11 — correctness audit, pass 2 (2026-11-09, branch `g1/audit-pass-2`, PR #75)
 
 Covers the `dev/g1/` files §G1.10 didn't reach: `TrackStore`, `LayerCLI`,
 `CotXml` (split out by the CoT canary), `run.sh`, the `atak-headless`
@@ -931,9 +931,12 @@ Traps found on the way (do not rediscover these):
   exited from the `try` and from both `catch` blocks, so the `finally`
   that closes the tracks DB never ran on a failure path; it was dead
   code. **Guard:** the exit code is computed in the `try`/`catch` and
-  `System.exit` runs once, after the `finally`. No automated pin: the
-  path needs commo and the engine dylibs (CI's hermetic round-trip
-  covers the success path).
+  `System.exit` runs once, after the `finally`. Pinned on the success
+  path: the hermetic round-trip asserts both clients exit 0 through
+  that single exit (`run.sh` fails on `rc_a`/`rc_b` ≠ 0). Not pinned:
+  the DB close on a failure exit. That path needs a commo or engine
+  failure mid-run, which no CI job injects; the fix's structure is the
+  only guard there.
 - **`run.sh` couldn't tell a dead client A from a slow one.** It
   polled A's log for `iface-up` for the full 90 s even when A had
   already exited (connect refused, bad cert, native load). **Guard:**
@@ -946,8 +949,7 @@ UTF chars, each OpenSSL provider loaded once); `gen-jni-headers.sh`.
 `fake-cot-server.py` has one test-fixture-only quirk: a non-blocking
 `sendall` that hits a full peer buffer drops that client.
 
-Evidence (this box, JDK 21; `make test-roundtrip` and `layer.sh` need
-the dev Mac and are left to CI and a local run):
+Evidence (this box, JDK 21, then CI on #75's head `adddefd`):
 
 ```text
 $ bash dev/g1/headless/test/cot.sh
@@ -968,7 +970,18 @@ Compile gate: the launcher's file set under `-source 8 -Xlint:all
 commo's API from the pin and the transplant jars. `datapackage.sh`:
 `datapackage-selftest: ALL PASS`. shellcheck and markdownlint: 0 issues.
 
-## G1.12 — GDAL 3 axis order on the C++ OGR path (2026-11-10, residual of G2 trap #48)
+CI (`cot-roundtrip.yml` and `ci.yml` on `adddefd`). The hermetic
+round-trip runs `TrackStore` and the `HeadlessCLI` exit path end to
+end, and `layer.sh` passed in `native-engine` (ci.yml run 42724482488):
+
+```text
+headless: summary received=15 persisted=15 ifaceUpSeen=true presenceSent=8 markerSent=1
+headless: track uid=fake-cot-001 type=a-f-G-U-C callsign=- lat=37.774900 lon=-122.419400 time=2026-11-10T00:05:11.481Z fixes=8
+[g1-roundtrip] sqlite3 …/roundtrip-a.sqlite: 15 fix(es), 1 for B's marker
+[g1-roundtrip] PASS — both ifaces up, B's presence+marker relayed to A, A's presence relayed to B, both persisted in the tracks DBs
+```
+
+## G1.12 — GDAL 3 axis order on the C++ OGR path (2026-11-10, branch `g1/ogr-axis-order`, PR #76; residual of G2 trap #48)
 
 Found in audit pass 3. G2.4b b.2 pinned `OAMS_TRADITIONAL_GIS_ORDER` on
 the Java SRSes (`GdalLibrary.EPSG_4326`, `GdalDatasetProjection2`); the

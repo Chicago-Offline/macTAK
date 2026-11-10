@@ -1249,6 +1249,14 @@ Traps found on the way (do not rediscover these):
   **Guard:** none yet. Whoever wires data-package or mission sync (G6
   rung 5) must always pass the truststore's CA certs to these calls;
   this entry is the reminder.
+- **The tracks DB was readable by every local account** (pass 2, #7).
+  `--db` handed the path to the engine's sqlite open, which created the
+  file under the default umask: 0644 on macOS. The file holds every
+  position received from other users. **Guard:** `TrackStore` creates a
+  new file 0600 before the open (sqlite reads an empty file as a new
+  database and gives its `-journal`/`-wal` files the database's mode); an
+  existing file keeps its mode. `run.sh` fails unless both clients' DBs
+  are 600. A `null` path is the engine's `:memory:` database, so no file.
 
 Evidence for #1 (CI, `cot-roundtrip.yml` dispatch runs). Before: the
 test alone on `8b38d91`, unpatched commo (run 42741415679):
@@ -1270,6 +1278,22 @@ After: with the patch, on `237d36d` (run 42743222107):
 [tls-test] ok   impostor: refuse
     headless: iface-error CONN_SSL_PEER_CERT_NOT_TRUSTED
 [tls-test] PASS: server certs accepted, client-only impostor refused
+[g1-roundtrip] PASS — both ifaces up, B's presence+marker relayed to A, A's presence relayed to B, both persisted in the tracks DBs
+```
+
+Evidence for #7 (CI, `cot-roundtrip.yml`). Before: the `run.sh` guard
+alone on `239d51c` (dispatch run 42758526452):
+
+```text
+[g1-roundtrip] sqlite3 …/roundtrip-a.sqlite: 16 fix(es), 1 for B's marker
+[g1-roundtrip] FAIL: roundtrip-a.sqlite has mode 644, want 600 (owner-only)
+[g1-roundtrip] FAIL: roundtrip-b.sqlite has mode 644, want 600 (owner-only)
+```
+
+After: with the `TrackStore` fix, on `c6238ca` (run 42758809720):
+
+```text
+[g1-roundtrip] sqlite3 …/roundtrip-a.sqlite: 15 fix(es), 1 for B's marker
 [g1-roundtrip] PASS — both ifaces up, B's presence+marker relayed to A, A's presence relayed to B, both persisted in the tracks DBs
 ```
 

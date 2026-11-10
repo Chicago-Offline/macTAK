@@ -248,6 +248,13 @@ jobs:
         if: needs.changes.outputs.changed == 'true'
         run: make test-gdal-projection
 
+      - name: GLES shim Buffer-contract canary (retained pointers need a direct Buffer)
+        # glVertexAttribPointer keeps its pointer until the draw call, so
+        # the shim must refuse an array-backed Buffer as Android does
+        # (dev/g2/render/test/gles-shim.sh, GlesShimSelfTest).
+        if: needs.changes.outputs.changed == 'true'
+        run: bash dev/g2/render/test/gles-shim.sh
+
       - name: GLMapView → EGL pbuffer render smoke (no layers)
         if: needs.changes.outputs.changed == 'true'
         env:

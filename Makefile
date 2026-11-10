@@ -123,6 +123,7 @@ test-tls:
 	@bash dev/g1/headless/test/tls-purpose.sh
 
 test-render:
+	bash dev/g2/render/test/gles-shim.sh
 	bash dev/g2/render/run.sh --out dev/g2/build/render-smoke.png
 	bash dev/g2/render/run.sh --layer dev/g1/headless/test/fixtures/sf-landmarks.geojson --out dev/g2/build/render-layer.png
 	bash dev/g2/fixtures/make-basemap.sh

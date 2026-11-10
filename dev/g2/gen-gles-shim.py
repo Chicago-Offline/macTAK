@@ -78,6 +78,11 @@ ATTRIB_INDEX_FUNCS = {"glEnableVertexAttribArray", "glDisableVertexAttribArray",
                       "glVertexAttrib1fv", "glVertexAttrib2fv", "glVertexAttrib3fv", "glVertexAttrib4fv",
                       "glVertexAttribI4i", "glVertexAttribI4ui", "glVertexAttribI4iv", "glVertexAttribI4uiv"}
 
+# Entry points whose pointer GL keeps after the call returns (client-side
+# vertex arrays). Only a direct Buffer has a stable address, so these take
+# bufferDirect, not bufferAcquire, and refuse anything else as Android does.
+RETAINED_POINTER_FUNCS = {"glVertexAttribPointer", "glVertexAttribIPointer"}
+
 def mangle(desc):
     # JNI overload mangling of the parameter descriptor
     sig = desc[1:desc.index(")")]
@@ -166,6 +171,9 @@ def gen_method(cls, ret, name, jparams, desc):
             pre.append("    %s *p%d = a%d ? (*env)->Get%sArrayElements(env, a%d, NULL) : NULL;" % (jt, i, i, fn, i))
             post.append("    if (a%d) (*env)->Release%sArrayElements(env, a%d, p%d, 0);" % (i, fn, i, i))
             cargs.append("(p%d ? p%d + a%d : NULL)" % (i, i, i + 1)); i += 2; continue
+        if t in BUFFER_ELEM and name in RETAINED_POINTER_FUNCS:
+            pre.append("    void *p%d = bufferDirect(env, a%d, %d);\n    if ((*env)->ExceptionCheck(env)) return;" % (i, i, BUFFER_ELEM[t]))
+            cargs.append("p%d" % i); i += 1; continue
         if t in BUFFER_ELEM:
             pre.append("    BufRef b%d; void *p%d = bufferAcquire(env, a%d, %d, &b%d);" % (i, i, i, BUFFER_ELEM[t], i))
             post.append("    bufferRelease(env, &b%d);" % i)
@@ -286,6 +294,26 @@ static void *bufferAcquire(JNIEnv *env, jobject buf, int elem, BufRef *ref)
     }
     if (ref->elem == 4 && (*env)->IsInstanceOf(env, buf, cls_FloatBuffer)) ref->elem = -4;  /* float marker */
     return ref->elems ? (char *)ref->elems + (size_t)(off + pos) * (size_t)elem : NULL;
+}
+
+/* A Buffer whose pointer GL keeps after the call returns (vertex attribute
+ * arrays). Only a direct Buffer has a stable address: bufferAcquire's copy
+ * of a backing array is freed by bufferRelease, which would leave GL a
+ * dangling pointer at draw time. Android throws IllegalArgumentException
+ * for a non-direct Buffer here; so does this. */
+static void *bufferDirect(JNIEnv *env, jobject buf, int elem)
+{
+    if (!buf) return NULL;
+    initBuffer(env);
+    if (!(*env)->CallBooleanMethod(env, buf, mid_isDirect)) {
+        (*env)->ThrowNew(env, (*env)->FindClass(env, "java/lang/IllegalArgumentException"),
+                         "Must use a native order direct Buffer");
+        return NULL;
+    }
+    if (elem == 0) elem = bufferElemSize(env, buf);
+    jint pos = (*env)->CallIntMethod(env, buf, mid_position);
+    char *base = (char *)(*env)->GetDirectBufferAddress(env, buf);
+    return base ? base + (size_t)pos * (size_t)elem : NULL;
 }
 
 static void bufferRelease(JNIEnv *env, BufRef *ref)

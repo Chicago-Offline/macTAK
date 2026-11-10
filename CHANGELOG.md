@@ -291,6 +291,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- Recorded, not fixed: opening a layer file can make GDAL fetch remote
+  URLs (`dev/g1/NOTES.md` §G1.14, G1 security audit #10). The engine
+  opens layer files with every GDAL driver registered. An OGR VRT naming
+  a `/vsicurl/` source, and a GML file whose `schemaLocation` names a WFS
+  URL, each sent requests to a loopback listener. atak-headless opens
+  only files the user names today; G6 must restrict drivers before it
+  imports overlays from data packages or peers. The deep pass also
+  records commo's stream framing, XML parse and lack of a listening
+  socket as reviewed clean, and that native dependencies are only as
+  current as Homebrew on the machine (#11). The #7 evidence block in
+  NOTES moves out of the middle of #1's.
+
 - atak-headless creates its `--db` tracks database owner-only (0600)
   (`dev/g1/NOTES.md` §G1.14, G1 security audit #7). The file holds every
   position received from other users, and the engine's sqlite open created

@@ -1156,10 +1156,12 @@ and its password. Six findings; each lands as its own focused PR.
 | 3 | Low | Inbound CoT printed raw to the terminal: escape-sequence injection, and forged `headless:` lines | **Fixed** (branch `g1/sanitize-inbound-log`): `CotXml.printable`, guarded by `CotEventSelfTest` |
 | 4 | Low (dormant) | commo's curl paths (file transfer, mission packages, URL requests) skip the hostname check always, and the chain check when the caller passes no CA or the transfer is peer-hosted | Recorded below (narrowed in pass 2: a caller rule, not a patch); unused by atak-headless today |
 | 5 | Note | `NativeSsl` loads OpenSSL's legacy provider process-wide, not only for the RC2-40 PKCS#12 read | Recorded |
-| 6 | Note | Reviewed, no issue: data-package importer (Zip-Slip, size caps, XXE, no password in logs, 0700 cert dir), `CotEvent` (XXE + §G1.11 validation), `TrackStore` (bound parameters), fake server (loopback only) | — |
+| 6 | Note | Reviewed, no issue: data-package importer (Zip-Slip, size caps, XXE, no password in logs, 0700 cert dir), `CotEvent` (XXE + §G1.11 validation), `TrackStore` (bound parameters), fake server (loopback only); deep pass: commo's stream framing (fixed 64 KiB buffer, protobuf length capped at it, overflow discards rather than overruns), its XML parse (`XML_PARSE_NONET`, no entity substitution or external DTD), and no listening socket (the mission-package web server starts only after `setupMissionPackageIO`, which atak-headless never calls) | — |
 | 7 | Low | `--db` tracks DB created under the default umask (0644 on macOS): other local accounts can read every received position | **Fixed** (pass 2, branch `g1/security-audit-pass-2`): `TrackStore` creates it 0600, guarded by `run.sh` |
 | 8 | Note | `TrackStore` appends one row per received CoT with no cap or retention: a chatty or hostile server grows the file for as long as the client runs | Recorded; atak-headless runs bounded by `--duration`, G6 needs retention |
 | 9 | Note | The launcher prefers `~/.m2` kernel jars over the hash-checked transplants, so `check-transplants` vouches only for the fallback | Recorded; only the same user can write `~/.m2`, so no boundary is crossed |
+| 10 | Low today, Medium for G6 | Opening a layer file can make GDAL fetch remote URLs: the engine opens it with every driver registered, and some drivers follow references in the file | Recorded (deep pass, owner's call: no code change now); G6 must restrict drivers before importing overlays it did not choose |
+| 11 | Note | Native dependencies (GDAL, OpenSSL, libxml2, protobuf, curl) are Homebrew's, linked at run time from `/opt/homebrew`: CI always builds on the latest, a developer machine is as current as its last `brew upgrade` | Recorded |
 
 Trust model: a data package chooses the server you connect to, so a
 `.dp` is trusted configuration, not hostile input. Its parser is still
@@ -1257,6 +1259,27 @@ Traps found on the way (do not rediscover these):
   database and gives its `-journal`/`-wal` files the database's mode); an
   existing file keeps its mode. `run.sh` fails unless both clients' DBs
   are 600. A `null` path is the engine's `:memory:` database, so no file.
+- **A layer file can make GDAL reach the network** (deep pass, #10).
+  `OGR_Content2` calls `GDALOpenEx` with no allowed-driver list, so any
+  registered driver may claim the file, and some follow references in
+  it. Two were proven against a loopback listener (GDAL 3.8.4, Linux
+  `ogrinfo -ro -al -so`, evidence below): an OGR VRT whose
+  `SrcDataSource` is `/vsicurl/http://…` fetches that URL (HEAD and
+  ranged GETs), and a GML file whose `xsi:schemaLocation` names a WFS
+  `DescribeFeatureType` URL downloads it (`GML_DOWNLOAD_WFS_SCHEMA`
+  defaults to YES). An OGR VRT can also point at another local file
+  (`CSV:/path`). Impact: a hostile file reveals the client's address and
+  the moment it was opened, and sends GETs to hosts the client can
+  reach, such as services on localhost or the LAN. Today `LayerCLI`
+  opens only files the user names. GDAL has no single switch that turns
+  its network access off. **Guard:** none, by the owner's call on
+  2026-11-10. The fix when G6 imports overlays from data packages or
+  peers: after `GdalLibrary::init`, deregister every vector driver
+  outside an allowlist of formats that never follow references (GeoJSON,
+  GPKG, KML, LIBKML, ESRI Shapefile, GPX, FlatGeobuf; the first four are
+  what `layer.sh` proves), in `dev/g1/jni-extra/mactak_gdal.cpp`, with no
+  engine patch. A denylist (`OGR_VRT`, `GML`, `GMLAS`, `WFS`, `OAPIF`)
+  is the weaker alternative.
 
 Evidence for #1 (CI, `cot-roundtrip.yml` dispatch runs). Before: the
 test alone on `8b38d91`, unpatched commo (run 42741415679):
@@ -1281,6 +1304,16 @@ After: with the patch, on `237d36d` (run 42743222107):
 [g1-roundtrip] PASS — both ifaces up, B's presence+marker relayed to A, A's presence relayed to B, both persisted in the tracks DBs
 ```
 
+The same rule, checked in C against commo's `checkCert` logic on
+OpenSSL 3, for a TAK-style `serverAuth,clientAuth` leaf as well:
+`server-eku`, `server-noeku`, `server-both` ACCEPT before and after;
+`client-only` ACCEPT before, REJECT (26 invalid purpose) after.
+
+Evidence for #2 (this box): `make check-transplants` →
+`[check-transplants] OK: every transplant jar is listed and matches`;
+shellcheck and `actionlint` clean; the hook end to end with the
+manifest staged → `[pre-commit] OK`.
+
 Evidence for #7 (CI, `cot-roundtrip.yml`). Before: the `run.sh` guard
 alone on `239d51c` (dispatch run 42758526452):
 
@@ -1297,12 +1330,18 @@ After: with the `TrackStore` fix, on `c6238ca` (run 42758809720):
 [g1-roundtrip] PASS — both ifaces up, B's presence+marker relayed to A, A's presence relayed to B, both persisted in the tracks DBs
 ```
 
-The same rule, checked in C against commo's `checkCert` logic on
-OpenSSL 3, for a TAK-style `serverAuth,clientAuth` leaf as well:
-`server-eku`, `server-noeku`, `server-both` ACCEPT before and after;
-`client-only` ACCEPT before, REJECT (26 invalid purpose) after.
+Evidence for #10 (this box, GDAL 3.8.4, `ogrinfo -ro -al -so` on each
+file; a Python listener on 127.0.0.1 logged the request paths):
 
-Evidence for #2 (this box): `make check-transplants` →
-`[check-transplants] OK: every transplant jar is listed and matches`;
-shellcheck and `actionlint` clean; the hook end to end with the
-manifest staged → `[pre-commit] OK`.
+```text
+beacon.vrt   <SrcDataSource>/vsicurl/http://127.0.0.1:18555/beacon.geojson</SrcDataSource>
+schema.gml   xsi:schemaLocation="… http://127.0.0.1:18555/gml-schema?SERVICE=WFS&REQUEST=DescribeFeatureType&TYPENAME=a"
+
+listener:
+/beacon.geojson
+/beacon.geojson
+/
+/beacon.geojso1
+/beacon.geojso1
+/gml-schema?SERVICE=WFS&REQUEST=DescribeFeatureType&TYPENAME=a
+```

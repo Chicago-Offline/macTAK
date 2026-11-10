@@ -170,6 +170,14 @@ else
   echo "[g1-roundtrip] sqlite3 not on PATH; on-disk DB check skipped"
 fi
 
+# G1.14: a tracks DB holds other users' positions, so TrackStore creates it
+# owner-only. BSD stat (macOS) first, GNU stat second.
+for db in "$DB_A" "$DB_B"; do
+  mode="$(stat -f %Lp "$db" 2>/dev/null || stat -c %a "$db" 2>/dev/null || echo '?')"
+  [[ "$mode" == 600 ]] \
+    || { echo "[g1-roundtrip] FAIL: $(basename "$db") has mode $mode, want 600 (owner-only)" >&2; fail=1; }
+done
+
 if [[ "$fail" -eq 0 ]]; then
   echo "[g1-roundtrip] PASS — both ifaces up, B's presence+marker relayed to A, A's presence relayed to B, both persisted in the tracks DBs"
   # logs + DBs go with the temp dir via the EXIT trap

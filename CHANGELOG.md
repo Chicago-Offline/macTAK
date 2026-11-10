@@ -68,6 +68,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `dev/g1` docs-only cleanup: NOTES §G1.11 now quotes the CI results it
+  had left pending (#75's hermetic round-trip `PASS` and `layer.sh` in
+  `native-engine`). Its `System.exit` trap names the guard that exists,
+  the round-trip's exit-code check, and the path left unpinned. §G1.11
+  and §G1.12 headings name their branches, as §G1.10's does. This
+  section's entries are back in newest-first order.
 - GDAL 3 axis order on the C++ OGR path (`dev/g1/NOTES.md` §G1.12, the C++
   residual of G2 trap #48): an offline layer in a projected CRS (UTM
   shapefile, Web-Mercator GeoPackage) opened with lat/lon swapped. The
@@ -77,6 +83,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in `GdalLibrary::initImpl`. `test/layer.sh` gains UTM 10N and EPSG:3857
   legs and checks a known point's coordinates on every leg; before, it only
   counted features.
+- G1 correctness audit, pass 2 (`dev/g1/NOTES.md` §G1.11, five traps):
+  `CotEvent` refuses a received `<point>` without a finite, in-range
+  lat/lon, and Java-only number forms (`45f`, `0x1p5`). The tracks DB had
+  stored them as `"NaN"` text, which reads back as 0,0. `TrackStore`
+  stores an unknown `hae` as SQL NULL. `CotXml.xmlEscape` keeps tab/LF/CR
+  and replaces characters XML 1.0 cannot carry; one control character in
+  a callsign had made every outgoing CoT unparseable. `HeadlessCLI`
+  closes the tracks DB on failure exits too (`System.exit` had skipped
+  the `finally`). `run.sh` fails fast when client A exits before
+  iface-up. Pinned by 13 new `CotEventSelfTest` assertions
+  (`test/cot.sh`).
 - G1 correctness audit (`dev/g1/NOTES.md` §G1.10): `getDirContents` and
   the filtered `IO_listFiles` no longer return empty listings. They passed
   an unbound `STLVectorAdapter` to `listFiles`, the core-engine twin of the
@@ -92,17 +109,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `CotEvent` reads `<point>`/`<contact>` as direct children,
   `LayerStore.bounds()` now unions Z, and `test/layer.sh` checks exact
   feature counts.
-- G1 correctness audit, pass 2 (`dev/g1/NOTES.md` §G1.11, five traps):
-  `CotEvent` refuses a received `<point>` without a finite, in-range
-  lat/lon, and Java-only number forms (`45f`, `0x1p5`). The tracks DB had
-  stored them as `"NaN"` text, which reads back as 0,0. `TrackStore`
-  stores an unknown `hae` as SQL NULL. `CotXml.xmlEscape` keeps tab/LF/CR
-  and replaces characters XML 1.0 cannot carry; one control character in
-  a callsign had made every outgoing CoT unparseable. `HeadlessCLI`
-  closes the tracks DB on failure exits too (`System.exit` had skipped
-  the `finally`). `run.sh` fails fast when client A exits before
-  iface-up. Pinned by 13 new `CotEventSelfTest` assertions
-  (`test/cot.sh`).
 - GDAL 3 axis order (trap #48): `GdalLibrary.EPSG_4326` and every dataset
   SRS `GdalDatasetProjection2` transforms through are pinned to
   `OAMS_TRADITIONAL_GIS_ORDER` via a new `GdalLibrary.traditionalGisOrder`

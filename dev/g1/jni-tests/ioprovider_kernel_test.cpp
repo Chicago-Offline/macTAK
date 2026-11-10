@@ -22,8 +22,11 @@
 
 #include <gtest/gtest.h>
 
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 #include <string>
 
 #include "jni_test_env.hpp"
@@ -40,6 +43,22 @@ namespace
         char tmpl[] = "/tmp/takjni-kernel-XXXXXX";
         const char *d = mkdtemp(tmpl);
         return d ? std::string(d) : std::string();
+    }
+
+    /* The temp dirs are flat (touch_file only): unlink each entry, then
+     * the dir. remove(dir) alone fails with ENOTEMPTY on a non-empty
+     * directory, which leaked a /tmp/takjni-kernel-* dir per run. The
+     * EXPECT makes a leak a test failure. */
+    void remove_flat_dir(const std::string &dir)
+    {
+        if(DIR *d = opendir(dir.c_str())) {
+            while(const dirent *e = readdir(d)) {
+                if(strcmp(e->d_name, ".") != 0 && strcmp(e->d_name, "..") != 0)
+                    unlink((dir + "/" + e->d_name).c_str());
+            }
+            closedir(d);
+        }
+        EXPECT_EQ(rmdir(dir.c_str()), 0) << "temp dir not removed: " << dir;
     }
 
     void touch_file(const std::string &dir, const char *name)
@@ -66,7 +85,7 @@ TEST_F(JniKernelFilesystem, GetFileCountOfADirectory)
               TAK::Engine::Util::TE_Ok);
     EXPECT_EQ(count, 2u);   /* pristine: TE_IllegalState (isFile twice) */
 
-    remove(dir.c_str());
+    remove_flat_dir(dir);
 }
 
 TEST_F(JniKernelFilesystem, GetFileCountOfAFile)
@@ -80,7 +99,7 @@ TEST_F(JniKernelFilesystem, GetFileCountOfAFile)
               TAK::Engine::Util::TE_Ok);
     EXPECT_EQ(count, 1u);
 
-    remove(dir.c_str());
+    remove_flat_dir(dir);
 }
 
 TEST_F(JniKernelFilesystem, GetFileCountOfAMissingPath)

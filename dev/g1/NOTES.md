@@ -1059,3 +1059,85 @@ the process-wide option set. The GPKG legs' `no such column:
 definition_12_063` line shows up before and after, and on main's
 EPSG:4326 leg too. It's G1.3's known-benign noise, unrelated to this
 change.
+
+## G1.13 — correctness audit, pass 3: the rest of `dev/g1` (2026-11-10, branch `g1/jni-tests-hygiene`)
+
+Pass 3 covered what §G1.10/§G1.11 didn't reach: the engine patches'
+behaviour (applied to the pinned source), `jni-tests/`, the fixtures and
+`tools/`, now with the `clean-code` skills' audit procedure (smells
+first, then topic rules). Its one engine bug became §G1.12 (PR #76).
+Reviewed, no change needed:
+
+- **The whole patch series** applies at `--fuzz=0` against
+  ATAK-CIV `889eee2`, the new `gdal3-axis-order-cpp-default.patch`
+  included.
+- **`vsi-jfile-gdal3-api.patch`** ports exactly GDAL 3's VSI
+  interface: byte-count `Read`/`Write`, `ClearErr`/`Error` backed by
+  `m_error`, `VSIVirtualHandleUniquePtr`, `shared_ptr` install. Three
+  quirks came from upstream unchanged: a 32-bit `jsize` read length,
+  `Tell()`'s `-1` feeding `SEEK_CUR`, and `Eof()` true at
+  position == size rather than after a short read. None is reachable on
+  the G2 GeoTIFF path. Changing them would mean editing upstream lines
+  this patch doesn't own.
+- **`cpp17-legacy-headers.patch`** is mechanical: it drops the
+  dynamic exception specifications C++17 removed. No behaviour change.
+- **`tools/wave5`, `tools/wave6`** are one-off generators. Their
+  output is the committed patches, which the `--fuzz=0` apply gates;
+  all eight compile (`python3 -I -m py_compile`).
+- **`jni_test_env.hpp`** boots the JVM correctly, sizes its option
+  array exactly (classpath + 8), and turns a failed filesystem install
+  into a failure for every later test in the process.
+
+Traps found on the way (do not rediscover these):
+
+- **`remove()` on a non-empty directory fails, and the failure was
+  ignored.** The kernel-mode filesystem pins cleaned up with
+  `remove(dir)`, which returns `ENOTEMPTY` for a directory holding the
+  touched files. Every `make test-jni` leaked a `/tmp/takjni-kernel-*`
+  directory. Witness, the same calls in a C program: `before:
+  remove(dir) = -1 (Directory not empty); dir still exists: yes`.
+  **Guard:** `remove_flat_dir` unlinks the entries, then `rmdir`s with
+  an `EXPECT_EQ(…, 0)`, so a leak now fails the pin.
+- **A gtest pin that depends on test order passes vacuously when run
+  alone.** `JniGuardsOnLoad.LeavesTheEnvClean` checked for a pending
+  exception only because the test before it had called `JNI_OnLoad`.
+  Under `--gtest_filter=…LeavesTheEnvClean` or `--gtest_shuffle` it
+  checked an untouched env and passed. **Guard:** the pin calls
+  `JNI_OnLoad` itself. A repeat call only reassigns OnLoad's globals,
+  which is safe in a test process. The guards count stays 7.
+- **`jni_test_env.hpp` described a weak import that doesn't exist.**
+  Its comment said `takengine_jni_tests_env` was weak-imported and NULL
+  in the guards binary. But `module_main.cpp` links into both products
+  (ld64 refuses undefined weak imports in executables, §G1.9), so the
+  null check on the function's address was always true. clang said so
+  once per including TU (`warning: address of function
+  'takengine_jni_tests_env' will always evaluate to 'true'`; 6 in a CI
+  build). Behaviour was right, because the function returns NULL until
+  kernel mode stashes an env. **Guard:** the dead check is gone and the
+  comment states the real linkage. `-Wpointer-bool-conversion` on
+  `onload_guards_test.cpp` goes from 1 warning to 0.
+- **`make-datapackage.sh` with no arguments died on `set -u`'s bare
+  "unbound variable"** instead of saying how to call it. **Guard:** an
+  argument-count check prints `usage: make-datapackage.sh OUT.dp
+  [CALLSIGN]` and exits 2.
+
+Evidence: CI `native-engine` on `e74e487` (ci.yml run 42737701801),
+canary 3/4. The rewritten pins pass, `LeavesTheEnvClean` with its own
+`JNI_OnLoad`, and the kernel filesystem pins with the `rmdir` check
+(no leak):
+
+```text
+[g1] canary 3/4: JNI guard/behavior unit tests (real desktop JVM)
+[ RUN      ] JniGuardsOnLoad.LeavesTheEnvClean
+[       OK ] JniGuardsOnLoad.LeavesTheEnvClean (0 ms)
+[  PASSED  ] 7 tests.
+[ RUN      ] JniKernelFilesystem.GetFileCountOfADirectory
+[       OK ] JniKernelFilesystem.GetFileCountOfADirectory (3 ms)
+[ RUN      ] JniKernelFilesystem.GetFileCountOfAFile
+[       OK ] JniKernelFilesystem.GetFileCountOfAFile (0 ms)
+[  PASSED  ] 6 tests.
+[g1] jni-tests OK — guards + kernel pins green
+```
+
+The same build printed the `-Wpointer-bool-conversion` warning above
+for each test TU; the `jni_test_env.hpp` fix came after that run.

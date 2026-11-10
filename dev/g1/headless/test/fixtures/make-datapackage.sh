@@ -21,6 +21,10 @@ command -v zip >/dev/null 2>&1 || {
     exit 1
 }
 
+[[ $# -ge 1 && $# -le 2 ]] || {
+    echo "usage: make-datapackage.sh OUT.dp [CALLSIGN]" >&2
+    exit 2
+}
 OUT_DIR="$(cd "$(dirname "$1")" && pwd)"
 OUT="$OUT_DIR/$(basename "$1")"
 CALLSIGN="${2:-DP-UNIT}"

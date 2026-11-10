@@ -132,16 +132,17 @@ namespace jnitest
     }
 
     /* kernel mode: the launcher (JniTestsMain) hands the running VM's
-     * JNIEnv to the module entry, which stashes it. Weak-imported so the
-     * guards-mode binary (which does not link module_main.cpp) still
-     * links: the symbol is simply NULL there. */
+     * JNIEnv to the module entry, which stashes it. module_main.cpp links
+     * into BOTH products (build-native.sh; ld64 refuses undefined weak
+     * imports in executables, NOTES §G1.9), so the function always exists:
+     * in the guards binary nothing stashes an env and it returns NULL.
+     * (The old null check on the function's address was always true:
+     * clang -Wpointer-bool-conversion, once per including TU.) */
     extern "C" JNIEnv *takengine_jni_tests_env(void);
 
     inline JNIEnv *launcher_env()
     {
-        if(takengine_jni_tests_env)
-            return takengine_jni_tests_env();
-        return NULL;
+        return takengine_jni_tests_env();
     }
 
     inline JNIEnv *jni_env()

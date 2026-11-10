@@ -78,6 +78,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- G1 correctness audit, pass 3 (`dev/g1/NOTES.md` §G1.13, four traps):
+  the kernel-mode JNI pins cleaned up with `remove(dir)` on a non-empty
+  directory, which fails, leaking a `/tmp/takjni-kernel-*` dir per
+  `make test-jni` run. They now unlink and `rmdir`, and a leak fails
+  the pin. `JniGuardsOnLoad.LeavesTheEnvClean` no longer relies on the
+  previous test having called `JNI_OnLoad`; run alone or shuffled, it
+  had passed vacuously. `jni_test_env.hpp` drops an always-true null
+  check on a function address, which clang warned about in every test
+  TU, and its comment now states the real linkage, not a weak import.
+  `make-datapackage.sh` prints its usage instead
+  of an unbound-variable error. The rest of `dev/g1` (patch series at
+  `--fuzz=0`, the GDAL 3 VSI port, the C++17 header patch, `tools/`)
+  was reviewed with no change needed.
 - `dev/g1` docs-only cleanup: NOTES §G1.11 now quotes the CI results it
   had left pending (#75's hermetic round-trip `PASS` and `layer.sh` in
   `native-engine`). Its `System.exit` trap names the guard that exists,

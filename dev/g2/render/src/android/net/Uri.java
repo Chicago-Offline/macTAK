@@ -2,7 +2,7 @@ package android.net;
 
 import java.io.File;
 import java.net.URLDecoder;
-import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -47,7 +47,9 @@ public final class Uri implements Comparable<Uri> {
 
     public static Uri fromFile(File file) {
         if (file == null) throw new NullPointerException("file");
-        return new Uri("file://" + file.getAbsolutePath());
+        // Encode like Android's PathPart.fromDecoded: left raw, a '#' or '?'
+        // in a folder name cut the path short and "%25" read back as "%".
+        return new Uri("file://" + encode(file.getAbsolutePath(), "/"));
     }
 
     public static Uri fromParts(String scheme, String ssp, String fragment) {
@@ -125,15 +127,33 @@ public final class Uri implements Comparable<Uri> {
 
     public static String encode(String s) { return encode(s, null); }
 
+    /**
+     * Percent-encode as Android does: letters, digits, {@code _-!.~'()*} and
+     * the characters of {@code allow} stay; everything else becomes the
+     * %XX of its UTF-8 bytes.
+     */
     public static String encode(String s, String allow) {
         if (s == null) return null;
-        try {
-            String enc = URLEncoder.encode(s, "UTF-8").replace("+", "%20");
-            if (allow != null) for (char c : allow.toCharArray()) enc = enc.replace(URLEncoder.encode(String.valueOf(c), "UTF-8"), String.valueOf(c));
-            return enc;
-        } catch (Exception e) { return s; }
+        StringBuilder out = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); ) {
+            final int cp = s.codePointAt(i);
+            final int len = Character.charCount(cp);
+            if (isUnreserved(cp) || (allow != null && allow.indexOf(cp) >= 0)) {
+                out.appendCodePoint(cp);
+            } else {
+                for (byte b : s.substring(i, i + len).getBytes(StandardCharsets.UTF_8)) {
+                    out.append('%').append(HEX[(b >> 4) & 0xF]).append(HEX[b & 0xF]);
+                }
+            }
+            i += len;
+        }
+        return out.toString();
     }
-
+    private static final char[] HEX = "0123456789ABCDEF".toCharArray();
+    private static boolean isUnreserved(int c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                || "_-!.~'()*".indexOf(c) >= 0;
+    }
     @Override public String toString() { return uriString; }
     @Override public int compareTo(Uri o) { return uriString.compareTo(o.uriString); }
     @Override public boolean equals(Object o) { return o instanceof Uri && ((Uri) o).uriString.equals(uriString); }

@@ -1065,7 +1065,7 @@ fixed on its own branch, in this order.
 | # | Severity | Finding | Status |
 |---|---|---|---|
 | 1 | High | The basemap leg of the render smoke could not fail: it passed on "content pixels > 0", which the vector layer alone satisfies | **Fixed here**: `ContentGate`, guarded by `render/test/basemap-gate.sh` |
-| 2 | Medium | `android.net.Uri.fromFile` does not encode the path: `#` and `?` truncate it, `%XX` is decoded. The engine opens its databases through it (13 call sites) | Open |
+| 2 | Medium | `android.net.Uri.fromFile` does not encode the path: `#` and `?` truncate it, `%XX` is decoded. The engine opens its databases through it (13 call sites) | **Fixed** (branch `g2/uri-fromfile-encoding`): `fromFile` encodes like Android, guarded by `render/test/uri.sh` |
 | 3 | Medium (latent) | The GLES shim's `glVertexAttribPointer` accepts an array-backed `Buffer`: GL keeps a pointer into a copy that `bufferRelease` frees. Android rejects non-direct buffers there | Open |
 | 4 | Low | `Uri.getQueryParameter` leaves `+` as `+`; Android decodes it to a space | Open |
 | 5 | Low | `shell/run.sh` leaks its scratch `MACTAK_HOME` every run: the `EXIT` trap never fires after `exec` | Open |
@@ -1093,6 +1093,21 @@ Traps found on the way (continuing G2 numbering):
   CI and `make test-render`: the same graticule built over the Oakland
   hills, east of the camera frame, must make the smoke exit 1 with
   `FAIL: basemap attached but content covers …`.
+- **#52 — `Uri.fromFile` built its string from the raw path.** The
+  stand-in parsed `"file://" + file.getAbsolutePath()`, so URI syntax in
+  a folder or file name was read as URI syntax: `Maps #2/tracks.sqlite`
+  came back from `getPath()` cut off after `Maps` and its space (the
+  rest became the fragment), `what?/a.kml` lost everything after `what`, and
+  `100%25 done` read back as `100% done`. `IOProviderFactory` and
+  `DefaultIOProvider` open databases at `info.uri.getPath()`, so the
+  engine would have opened, or created, the wrong file. Android encodes
+  the path first (`PathPart.fromDecoded`). **Guard:** `fromFile` now
+  passes the path through `Uri.encode(path, "/")`, and `encode` follows
+  Android's rule exactly: letters, digits and `_-!.~'()*` stay, the rest
+  becomes the %XX of its UTF-8 bytes (the old `URLEncoder` route also
+  escaped `!~'()`). `render/test/uri.sh` (pure JDK; CI's JVM job) pins
+  seven round-trip paths, the encoded string, `encode`/`decode`, and the
+  `parse` behaviour the engine already relied on.
 
 Evidence for #1 (CI, render job, ANGLE Metal on a hosted runner).
 Before: the canary alone on `be59312`, old gate (dispatch run
@@ -1117,3 +1132,17 @@ step still passes with `content pixels=262144`:
     render-smoke: FAIL
 [basemap-gate] PASS: an off-frame basemap fails the smoke
 ```
+
+Evidence for #2 (this box, JDK 21; `bash dev/g2/render/test/uri.sh`).
+Before, the canary against the old `Uri` on `30ed6d0`: 10 of 46 checks
+fail, among them:
+
+```text
+FAIL: fromFile round trip: /Users/m/Maps #2/tracks.sqlite (expected [/Users/m/Maps #2/tracks.sqlite], got [/Users/m/Maps ])
+FAIL: fromFile has no query: /Users/m/what?/a.kml (expected [null], got [/a.kml])
+FAIL: fromFile round trip: /Users/m/100%25 done/a.kml (expected [/Users/m/100%25 done/a.kml], got [/Users/m/100% done/a.kml])
+FAIL: encode leaves Android's unreserved characters (expected [a%20b!~'()*-_.], got [a%20b%21%7E%27%28%29*-_.])
+uri-canary: FAIL (10 check(s))
+```
+
+After, with the fix: 46 `PASS` lines and `uri-canary: PASS`.

@@ -490,6 +490,13 @@ jobs:
         if: needs.changes.outputs.changed == 'true'
         run: bash dev/g1/headless/test/cot.sh
 
+      - name: android.net.Uri stand-in canary
+        # Pure JDK: Uri.fromFile round trips for paths holding URI syntax
+        # (the engine opens its databases through it), Android's
+        # encode/decode rules, and parse (dev/g2/render/test/uri.sh).
+        if: needs.changes.outputs.changed == 'true'
+        run: bash dev/g2/render/test/uri.sh
+
       - name: Compile-only gate for the headless launcher src
         # #29: nothing above type-checked dev/g1/headless/src — the launcher
         # javacs itself at launch (atak-headless), so HeadlessCLI.java and the

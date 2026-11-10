@@ -78,6 +78,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `Uri.fromFile` round-trips any path (`dev/g2/NOTES.md` §G2.5, trap
+  #52, G2 correctness audit #2). The macOS `android.net.Uri` stand-in
+  built `file://` URIs from the raw path, so a `#` or `?` in a folder
+  name cut `getPath()` short and `%25` read back as `%`; the engine
+  opens its databases at that path. `fromFile` now encodes the path as
+  Android does, and `Uri.encode` keeps Android's unreserved set
+  (`_-!.~'()*`). `dev/g2/render/test/uri.sh` (CI's JVM job) pins it.
+
 - The render smoke's basemap leg can now fail (`dev/g2/NOTES.md` §G2.5,
   trap #51, G2 correctness audit #1). `RenderSmoke` and `WindowApp`
   passed on "content pixels > 0", which the vector layer drawn over the

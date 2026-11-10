@@ -1,4 +1,4 @@
-.PHONY: help hooks build build-angle angle gdal-java test-gdal-projection gen-gles-shim check-gen-gles-shim check-engine-shadows test test-jni test-roundtrip test-render test-render-resize build-window-host test-render-window smoke-window lint clean
+.PHONY: help hooks build build-angle angle gdal-java test-gdal-projection gen-gles-shim check-gen-gles-shim check-engine-shadows check-transplants test test-jni test-roundtrip test-render test-render-resize build-window-host test-render-window smoke-window lint clean
 
 # The android.opengl.GLES20/30 runtime is GENERATED (dev/g2/gen-gles-shim.py):
 # two Java classes, the JNI bodies and the stub-mode libGLESv2. Edit the
@@ -32,6 +32,7 @@ help:
 	@echo "  gen-gles-shim  - regenerate the android.opengl GLES shim (Java + JNI + stub) from the transplant jar x gl3.h"
 	@echo "  check-gen-gles-shim - regenerate and fail if the committed shim files differ (CI drift gate)"
 	@echo "  check-engine-shadows - fail if a shadowed engine Java class differs from upstream src/ + its dev/g1/patches hunk (CI drift gate)"
+	@echo "  check-transplants - fail if a committed transplant jar is unlisted in, or differs from, its SHA256SUMS (CI gate)"
 	@echo "  test           - run smoke tests (dev/g1/smoke/run.sh)"
 	@echo "  test-jni       - G1.9 JNI guard/behavior unit canary on a real desktop JVM: guards mode (class-init bailouts, clean JNI_ERR) + kernel mode (Java-backed IOProviderFactory on real files) (dev/g1/jni-tests/run.sh; skips without a JDK)"
 	@echo "  test-roundtrip - run headless round-trip tests (dev/g1/headless/run.sh)"
@@ -76,6 +77,9 @@ check-gen-gles-shim:
 	rm -rf "$$tmp"; \
 	[ $$ok = 1 ] && echo "[check-gen-gles-shim] OK: committed shim matches the generator" \
 		|| { echo "[check-gen-gles-shim] run 'make gen-gles-shim' and commit the result"; exit 1; }
+
+check-transplants:
+	@bash dev/check-transplants.sh
 
 check-engine-shadows:
 	@[ -d $(ENGINE_SHADOW_SRC) ] || { echo "[check-engine-shadows] SKIP: $(ENGINE_SHADOW_SRC) not present (upstream src/ not checked out)"; exit 0; }; \

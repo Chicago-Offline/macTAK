@@ -53,17 +53,15 @@ while IFS= read -r f; do
             fi
             checked=$((checked + 1))
             ;;
-        dev/g1/transplants/*.jar|dev/spike/g0/transplants/*.jar)
-            dir=$(dirname "$f")
-            sums="$dir/SHA256SUMS"
-            if [ ! -f "$sums" ]; then
-                echo "[pre-commit] missing SHA256SUMS for $f"
-                fail=1
-            elif (cd "$dir" && shasum -a 256 -c SHA256SUMS >/dev/null); then
-                echo "[pre-commit] jar checksum OK: $f"
-            else
-                echo "[pre-commit] jar checksum mismatch: $f"
-                fail=1
+        dev/g1/transplants/*|dev/spike/g0/transplants/*)
+            # One check for hook, make and CI: every jar listed and matching,
+            # and no unlisted jar (dev/check-transplants.sh). Run once per
+            # commit however many transplant files are staged.
+            if [ "${transplants_checked:-0}" -eq 0 ]; then
+                transplants_checked=1
+                if ! bash dev/check-transplants.sh; then
+                    fail=1
+                fi
             fi
             checked=$((checked + 1))
             ;;

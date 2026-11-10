@@ -1,5 +1,10 @@
 package mactak.headless;
 
+import java.io.IOException;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -38,8 +43,13 @@ public final class TrackStore implements AutoCloseable {
     private final DatabaseIface db;
     private boolean closed;
 
-    /** {@code path == null} opens a private temporary database (engine semantics). */
+    /**
+     * {@code path == null} opens a private temporary database (engine
+     * semantics). A new file at {@code path} is created owner-only (0600):
+     * it holds other users' positions. An existing file keeps its mode.
+     */
     public TrackStore(String path) {
+        if (path != null) createOwnerOnly(path);
         db = DatabaseImpl.openOrCreate(path);
         if (db == null) throw new IllegalStateException("DatabaseImpl.openOrCreate failed for " + path);
         db.execute("CREATE TABLE IF NOT EXISTS tracks ("
@@ -52,6 +62,25 @@ public final class TrackStore implements AutoCloseable {
                 + " stale TEXT,"
                 + " received_at INTEGER NOT NULL)", null);
         db.execute("CREATE INDEX IF NOT EXISTS tracks_uid ON tracks(uid, id)", null);
+    }
+
+    /**
+     * Create path empty with mode 0600 unless it exists. sqlite reads an empty
+     * file as a new database, and gives its -journal / -wal files the
+     * database file's mode, so they stay owner-only too. Without this the
+     * engine's sqlite open creates it 0644 under the default umask.
+     */
+    private static void createOwnerOnly(String path) {
+        try {
+            Files.createFile(Paths.get(path),
+                    PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+        } catch (FileAlreadyExistsException e) {
+            // the caller's file, the caller's mode
+        } catch (UnsupportedOperationException e) {
+            // not a POSIX filesystem: no mode to set; openOrCreate creates it
+        } catch (IOException e) {
+            throw new IllegalStateException("cannot create tracks DB " + path + ": " + e.getMessage(), e);
+        }
     }
 
     public synchronized void record(CotEvent e, long receivedAtMillis) {

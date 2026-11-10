@@ -1096,8 +1096,8 @@ Traps found on the way (continuing G2 numbering):
 - **#52 — `Uri.fromFile` built its string from the raw path.** The
   stand-in parsed `"file://" + file.getAbsolutePath()`, so URI syntax in
   a folder or file name was read as URI syntax: `Maps #2/tracks.sqlite`
-  came back from `getPath()` as `…/Maps ` (the rest became the
-  fragment), `what?/a.kml` lost everything after `what`, and
+  came back from `getPath()` cut off after `Maps` and its space (the
+  rest became the fragment), `what?/a.kml` lost everything after `what`, and
   `100%25 done` read back as `100% done`. `IOProviderFactory` and
   `DefaultIOProvider` open databases at `info.uri.getPath()`, so the
   engine would have opened, or created, the wrong file. Android encodes

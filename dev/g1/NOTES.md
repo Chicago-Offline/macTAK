@@ -1105,12 +1105,39 @@ Traps found on the way (do not rediscover these):
   checked an untouched env and passed. **Guard:** the pin calls
   `JNI_OnLoad` itself. A repeat call only reassigns OnLoad's globals,
   which is safe in a test process. The guards count stays 7.
+- **`jni_test_env.hpp` described a weak import that doesn't exist.**
+  Its comment said `takengine_jni_tests_env` was weak-imported and NULL
+  in the guards binary. But `module_main.cpp` links into both products
+  (ld64 refuses undefined weak imports in executables, §G1.9), so the
+  null check on the function's address was always true. clang said so
+  once per including TU (`warning: address of function
+  'takengine_jni_tests_env' will always evaluate to 'true'`; 6 in a CI
+  build). Behaviour was right, because the function returns NULL until
+  kernel mode stashes an env. **Guard:** the dead check is gone and the
+  comment states the real linkage. `-Wpointer-bool-conversion` on
+  `onload_guards_test.cpp` goes from 1 warning to 0.
 - **`make-datapackage.sh` with no arguments died on `set -u`'s bare
   "unbound variable"** instead of saying how to call it. **Guard:** an
   argument-count check prints `usage: make-datapackage.sh OUT.dp
   [CALLSIGN]` and exits 2.
 
-Evidence: pending. The PR's `native-engine` job builds and runs
-`make test-jni` (guards 7 + kernel 6). Its log lines are quoted here
-before merge. Both test files pass `g++ -std=c++17 -fsyntax-only`
-against the pinned engine headers.
+Evidence: CI `native-engine` on `e74e487` (ci.yml run 42737701801),
+canary 3/4. The rewritten pins pass, `LeavesTheEnvClean` with its own
+`JNI_OnLoad`, and the kernel filesystem pins with the `rmdir` check
+(no leak):
+
+```text
+[g1] canary 3/4: JNI guard/behavior unit tests (real desktop JVM)
+[ RUN      ] JniGuardsOnLoad.LeavesTheEnvClean
+[       OK ] JniGuardsOnLoad.LeavesTheEnvClean (0 ms)
+[  PASSED  ] 7 tests.
+[ RUN      ] JniKernelFilesystem.GetFileCountOfADirectory
+[       OK ] JniKernelFilesystem.GetFileCountOfADirectory (3 ms)
+[ RUN      ] JniKernelFilesystem.GetFileCountOfAFile
+[       OK ] JniKernelFilesystem.GetFileCountOfAFile (0 ms)
+[  PASSED  ] 6 tests.
+[g1] jni-tests OK — guards + kernel pins green
+```
+
+The same build printed the `-Wpointer-bool-conversion` warning above
+for each test TU; the `jni_test_env.hpp` fix came after that run.

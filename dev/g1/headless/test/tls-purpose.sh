@@ -14,12 +14,18 @@
 #                                    (headless: iface-error CONN_SSL_PEER_CERT_NOT_TRUSTED,
 #                                     and no iface-up)
 #
+# Two more leaves carry OpenTAKServer's own profiles, read from
+# fixtures/ots-cert-profiles.cnf (pinned from its ca_config.py; a nightly
+# drift check keeps the copy honest): its server certificate must connect,
+# and a user certificate, which every enrolled user holds, must be refused.
+#
 # Needs the staged engine + comms stack (build-native.sh + build-commo.sh),
 # a JDK 8, python3 and openssl (any; macOS LibreSSL is fine).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # <repo>/dev/g1/headless/test
 CLI="$HERE/../atak-headless"
+OTS_PROFILES="$HERE/fixtures/ots-cert-profiles.cnf"
 SERVER="$HERE/../fake-cot-server.py"
 PASS=atakatak
 DURATION=6
@@ -59,6 +65,19 @@ leaf server-eku   "extendedKeyUsage=serverAuth"
 leaf server-noeku "basicConstraints=CA:FALSE"
 leaf impostor     "extendedKeyUsage=clientAuth"
 leaf client       "extendedKeyUsage=clientAuth"
+
+# The active lines of one section of the pinned OpenTAKServer profiles.
+ots_profile() {   # ots_profile SECTION
+  awk -v want="[ $1 ]" '
+    /^\[/ { in_section = ($0 == want); next }
+    in_section && NF && $0 !~ /^#/
+  ' "$OTS_PROFILES"
+}
+for section in server client; do
+  [[ -n "$(ots_profile "$section")" ]] \
+    || { echo "[tls-test] no [ $section ] section in $OTS_PROFILES" >&2; exit 1; }
+  leaf "ots-$section" "$(ots_profile "$section")"
+done
 
 # The client's own pair, as an ATAK data package ships it: client.p12
 # (cert + key) and a key-less truststore.p12 holding the CA.
@@ -102,9 +121,11 @@ run_leg() {   # run_leg NAME EXPECT(accept|refuse)
 run_leg server-eku   accept
 run_leg server-noeku accept
 run_leg impostor     refuse
+run_leg ots-server   accept
+run_leg ots-client   refuse
 
 if [[ "$rc" == 0 ]]; then
-  echo "[tls-test] PASS: server certs accepted, client-only impostor refused"
+  echo "[tls-test] PASS: server certs accepted, client-only impostors refused (OpenTAKServer profiles included)"
 else
   echo "[tls-test] FAIL"
 fi

@@ -1209,8 +1209,18 @@ Traps found on the way (do not rediscover these):
   (OpenSSL 3): `ots-server` ACCEPT before and after; `ots-client` ACCEPT
   before, REJECT (26) after. So on a stock OpenTAKServer the attack
   worked before the patch, and the real server stays reachable after it.
-  A live run against an OpenTAKServer is still worth doing when one is
-  next stood up; no server was available on 2026-11-10.
+  CI now proves the same through real commo: `tls-purpose.sh` signs two
+  more leaves with those profiles, read from
+  `test/fixtures/ots-cert-profiles.cnf`, and requires `ots-server` to
+  connect and `ots-client` to be refused. The copy can go stale, so
+  `dev/check-ots-profiles.py` compares it with upstream's `ca_config.py`
+  (every `[ client ]` and `[ server ]` occurrence; the server template's
+  `subjectAltName` is ignored because commo never checks the hostname).
+  It runs nightly in `ots-profile-drift.yml`, not as a PR gate: a red
+  run means upstream changed. It reads one text file and runs nothing of
+  OpenTAKServer's. A live run against an OpenTAKServer is still worth
+  doing when one is next stood up, for the handshake as a whole; no
+  server was available on 2026-11-10.
 - **atak-headless printed server-supplied text raw.** `headless:
   cot-received` collapsed only whitespace, so ESC, BEL and C1 sequences
   from a hostile server reached the terminal, where they can rewrite
@@ -1309,6 +1319,23 @@ The same rule, checked in C against commo's `checkCert` logic on
 OpenSSL 3, for a TAK-style `serverAuth,clientAuth` leaf as well:
 `server-eku`, `server-noeku`, `server-both` ACCEPT before and after;
 `client-only` ACCEPT before, REJECT (26 invalid purpose) after.
+
+OpenTAKServer's pinned profiles through real commo, on `ba7cef6`
+(dispatch run 42851764473):
+
+```text
+[tls-test] ok   ots-server: accept
+    headless: iface-up
+[tls-test] ok   ots-client: refuse
+    commo[ERROR] Error trying to make network connection for ssl:127.0.0.1:18093 - will retry (server certificate failed verification - check truststore)
+    headless: iface-error CONN_SSL_PEER_CERT_NOT_TRUSTED
+[tls-test] PASS: server certs accepted, client-only impostors refused (OpenTAKServer profiles included)
+```
+
+The drift check, same day: `[check-ots-profiles] OK: upstream [ client ]
+and [ server ] match the pinned profiles` (this box and the PR's
+`ots-profile-drift` job); exit 1 with `DRIFT [ server ]` on a copy of
+upstream with `clientAuth` removed from the server profile.
 
 Evidence for #2 (this box): `make check-transplants` →
 `[check-transplants] OK: every transplant jar is listed and matches`;

@@ -299,6 +299,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- The TLS server-purpose canary now covers OpenTAKServer's own
+  certificate profiles (`dev/g1/NOTES.md` §G1.14, G1 security audit #1).
+  `dev/g1/headless/test/tls-purpose.sh` signs a leaf with each profile
+  pinned in `test/fixtures/ots-cert-profiles.cnf` (from OpenTAKServer's
+  `ca_config.py`): the server certificate must connect and a user
+  certificate must be refused. `dev/check-ots-profiles.py`
+  (`make check-ots-profiles`) fails when upstream's profiles no longer
+  match the pinned copy; `.github/workflows/ots-profile-drift.yml` runs
+  it nightly.
+
 - Recorded, not fixed: opening a layer file can make GDAL fetch remote
   URLs (`dev/g1/NOTES.md` §G1.14, G1 security audit #10). The engine
   opens layer files with every GDAL driver registered. An OGR VRT naming

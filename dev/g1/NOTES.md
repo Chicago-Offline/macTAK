@@ -1141,3 +1141,48 @@ canary 3/4. The rewritten pins pass, `LeavesTheEnvClean` with its own
 
 The same build printed the `-Wpointer-bool-conversion` warning above
 for each test TU; the `jni_test_env.hpp` fix came after that run.
+
+## G1.14 — security audit (2026-11-10, branch `ci/transplant-integrity` and follow-ups)
+
+A security pass over `dev/g1`, following the untrusted input in: ATAK
+data packages (zip + PKCS#12 + XML), CoT from a TAK server or peers,
+and offline layer files (GDAL/OGR). The secrets are the PKCS#12 pair
+and its password. Six findings; each lands as its own focused PR.
+
+| # | Severity | Finding | Status |
+|---|---|---|---|
+| 1 | High | commo accepts any server cert that chains to the truststore CA: no TLS-server purpose check, and no hostname check (deliberate upstream, per ATAK) | Fix in a follow-up PR: commo patch adding the purpose check (Option A), with a TLS fake-server CI test |
+| 2 | Medium | Transplant jars not fully integrity-checked: slf4j jars unlisted, CI never verified hashes | **Fixed here** |
+| 3 | Low | Inbound CoT printed raw to the terminal: escape-sequence injection | Fix in a follow-up PR |
+| 4 | Low (dormant) | commo's curl paths (file transfer, mission packages, URL requests) set `VERIFYPEER`/`VERIFYHOST` to 0 | Recorded below; unused by atak-headless today |
+| 5 | Note | `NativeSsl` loads OpenSSL's legacy provider process-wide, not only for the RC2-40 PKCS#12 read | Recorded |
+| 6 | Note | Reviewed, no issue: data-package importer (Zip-Slip, size caps, XXE, no password in logs, 0700 cert dir), `CotEvent` (XXE + §G1.11 validation), `TrackStore` (bound parameters), fake server (loopback only) | — |
+
+Trust model: a data package chooses the server you connect to, so a
+`.dp` is trusted configuration, not hostile input. Its parser is still
+hardened against a malformed or hostile one.
+
+Traps found on the way (do not rediscover these):
+
+- **`shasum -c SHA256SUMS` only checks the files the manifest lists.**
+  `dev/g1/transplants/` shipped two slf4j jars the manifest never
+  named, so the pre-commit hook passed them unread, and CI ran no hash
+  check at all. Witness, the new check against the old manifest:
+  `[check-transplants] FAIL dev/g1/transplants/slf4j-api-1.7.30.jar:
+  not listed in SHA256SUMS` (same for `slf4j-simple`). Both jars match
+  Maven Central's published SHA-1 (`b5a4b6d…`, `e606eac…`), so nothing
+  was swapped. **Guard:** `dev/check-transplants.sh` fails on a
+  mismatch or an unlisted jar. It is the single check behind the hook,
+  `make check-transplants` and an unconditional CI lint step. A
+  one-byte flip in a copy fails it with `slf4j-api-1.7.30.jar: FAILED`.
+- **commo's HTTP paths turn TLS verification off** (dormant): ATAK-CIV's
+  `simplefileiomanager.cpp`, `missionpackagemanager.cpp` and
+  `urlrequestmanager.cpp` set `CURLOPT_SSL_VERIFYPEER`/`VERIFYHOST` to
+  0. atak-headless calls none of them today. **Guard:** none yet.
+  Whoever wires data-package or mission sync (G6 rung 5) must patch
+  these first; this entry is the reminder.
+
+Evidence (this box): `make check-transplants` →
+`[check-transplants] OK: every transplant jar is listed and matches`;
+shellcheck and `actionlint` clean; the hook end to end with the
+manifest staged → `[pre-commit] OK`.

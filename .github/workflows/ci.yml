@@ -499,6 +499,14 @@ jobs:
       - name: actionlint (all workflow files)
         uses: rhysd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
 
+      - name: Transplant jar integrity (make check-transplants)
+        # Every committed transplant jar must be listed in its SHA256SUMS
+        # and match it; an unlisted jar fails too. Runs on every PR (no
+        # changes guard): CI loads these jars into a JVM next to native
+        # code, and until this step only the opt-in pre-commit hook checked
+        # them (G1 security audit, dev/g1/NOTES.md §G1.14).
+        run: bash dev/check-transplants.sh
+
       - name: shellcheck + bash -n (dev/**/*.sh)
         if: needs.changes.outputs.changed == 'true'
         run: |

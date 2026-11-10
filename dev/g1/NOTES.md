@@ -1014,7 +1014,35 @@ Traps found on the way (do not rediscover these):
   **Guard:** every fixture-derived leg now checks Ferry Building's
   envelope (37.7955, −122.3937, within 1e-4°) as `LayerCLI` prints it.
 
-Evidence (CI, `ci.yml` on this branch): pending. A dispatch run on the
-guard-only commit (`fb844ba`, run 42724928764) must fail the two projected
-legs, and the PR run with the patch must pass them. Both runs' log lines
-are quoted here before merge.
+Evidence (CI, `ci.yml`, `native-engine` job). Before: a dispatch run on
+the guard-only commit `fb844ba` (run 42724928764). The EPSG:4326 legs
+pass and both projected legs fail with the axes swapped. Note the
+count-only `PASS` line under the flipped envelope: the old canary
+passed this layer.
+
+```text
+[layer-test] ok   sf-points.shp (3 feature(s))
+[layer-test] FAIL sf-points-utm10n.shp: Ferry Building at lat/lon -122.39370 37.79550, expected 37.7955 -122.3937
+      fid 4294967297   set 1   Ferry Building               Point              [-122.39370 37.79550 .. -122.39370 37.79550]
+    PASS: 3 feature(s) opened through FeatureDataStore2
+[layer-test] FAIL sf-landmarks-3857.gpkg: Ferry Building at lat/lon -122.39370 37.79550, expected 37.7955 -122.3937
+[layer-test] FAIL
+```
+
+After: PR #76's run with the patch (head `3738696`, run 42726706344):
+
+```text
+[layer-test] ok   sf-points-utm10n.shp (3 feature(s))
+      fid 4294967297   set 1   Ferry Building               Point              [37.79550 -122.39370 .. 37.79550 -122.39370]
+[layer-test] ok   sf-landmarks-3857.gpkg (8 feature(s))
+      fid 4294967297   set 1   Ferry Building               Point              [37.79550 -122.39370 .. 37.79550 -122.39370]
+[layer-test] PASS: offline layer(s) opened through FeatureDataStore2
+```
+
+`render-angle` shows the same pair: it fails on `fb844ba` and passes on
+`3738696`. That run also keeps the Java path green: its "Engine GDAL
+georeferencing on GDAL 3" step (`make test-gdal-projection`) passes with
+the process-wide option set. The GPKG legs' `no such column:
+definition_12_063` line shows up before and after, and on main's
+EPSG:4326 leg too. It's G1.3's known-benign noise, unrelated to this
+change.

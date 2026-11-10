@@ -1164,3 +1164,22 @@ uri-canary: FAIL (10 check(s))
 ```
 
 After, with the fix: 46 `PASS` lines and `uri-canary: PASS`.
+
+Evidence for #3 (CI, render job, `gles-shim.sh` on ANGLE Metal).
+Before: the canary alone on `7760aac`, old shim (dispatch run
+42881840590):
+
+```text
+FAIL: glVertexAttribPointer rejects an array-backed Buffer (GL would keep a dangling pointer)
+FAIL: glVertexAttribIPointer rejects an array-backed Buffer
+PASS: glVertexAttribPointer accepts a direct Buffer
+PASS: glVertexAttribPointer accepts a null Buffer
+PASS: glBufferData still takes an array-backed Buffer (data is copied before the call returns)
+PASS: no GL error raised
+gles-shim-canary: FAIL (2 check(s))
+```
+
+After: with `bufferDirect`, on `c01d89f` (PR #90's render job, run
+42882061813): all six `PASS`, `gles-shim-canary: PASS`, and the seven
+engine render smokes after it still `PASS` — the engine passes only
+direct buffers to these entry points.

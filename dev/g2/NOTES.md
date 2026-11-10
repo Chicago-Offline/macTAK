@@ -1068,7 +1068,7 @@ fixed on its own branch, in this order.
 | 2 | Medium | `android.net.Uri.fromFile` does not encode the path: `#` and `?` truncate it, `%XX` is decoded. The engine opens its databases through it (13 call sites) | **Fixed** (branch `g2/uri-fromfile-encoding`): `fromFile` encodes like Android, guarded by `render/test/uri.sh` |
 | 3 | Medium (latent) | The GLES shim's `glVertexAttribPointer` accepts an array-backed `Buffer`: GL keeps a pointer into a copy that `bufferRelease` frees. Android rejects non-direct buffers there | **Fixed** (branch `g2/gles-shim-direct-buffers`): `bufferDirect` in the generator, guarded by `render/test/gles-shim.sh` |
 | 4 | Low | `Uri.getQueryParameter` leaves `+` as `+`; Android decodes it to a space | **Fixed** (branch `g2/uri-query-plus`), guarded by `render/test/uri.sh` |
-| 5 | Low | `shell/run.sh` leaks its scratch `MACTAK_HOME` every run: the `EXIT` trap never fires after `exec` | Open |
+| 5 | Low | `shell/run.sh` leaks its scratch `MACTAK_HOME` every run: the `EXIT` trap never fires after `exec` | **Fixed** (branch `g2/shell-run-scratch-cleanup`): no `exec`, guarded by `dev/check-trap-exec.sh` |
 | 6 | Low | A value option given last crashes the Swift shell (array index out of range); `RenderSmoke` dies with a stack trace instead of usage | Open |
 | 7 | Low | `WindowApp.teardown` skips EGL destroy when it fails before the context exists; `BitmapRegionDecoder` leaks its file stream; `Canvas.save`/`restore` does not cover the clip; `fetch-angle.sh` pipes `otool` into `grep -q` under `pipefail` (the trap `env.sh` documents); the GLES shim does not bounds-check array offsets | Open |
 
@@ -1126,6 +1126,17 @@ Traps found on the way (continuing G2 numbering):
   `make test-render`) pins it on a 16x16 ANGLE pbuffer: both entry
   points refuse an array-backed buffer, accept a direct one and `null`,
   and `glBufferData` still takes an array-backed one.
+- **#54 — `exec` discards the shell that owns the `EXIT` trap.**
+  `shell/run.sh` made a scratch `MACTAK_HOME` with `mktemp -d`, armed
+  `trap 'rm -rf "$SCRATCH"' EXIT`, then launched the shell binary with
+  `exec`. `exec` replaces the bash process, so the trap never ran and
+  every `make test-shell` left a directory in `$TMPDIR` (the engine's
+  `atak/` data root for that run). `render/run.sh` has the same trap and
+  no `exec`, so it cleaned up. **Guard:** `shell/run.sh` now runs the
+  binary as its last command and exits with its status, so the code
+  WindowApp reports still reaches the caller. `dev/check-trap-exec.sh`
+  (CI lint job, `make lint`) fails any script under `dev/` that arms an
+  `EXIT` trap and also `exec`s a command.
 
 Evidence for #1 (CI, render job, ANGLE Metal on a hosted runner).
 Before: the canary alone on `be59312`, old gate (dispatch run
@@ -1196,3 +1207,16 @@ uri-canary: FAIL (1 check(s))
 After, with the fix: 53 `PASS` lines and `uri-canary: PASS`. `%2B`
 still reads back as a literal `+`, and `getQuery()` keeps `+` as it is:
 only parameter values convert it, as on Android.
+
+Evidence for #5 (this box). Before, the lint check alone on `00a039a`:
+
+```text
+[check-trap-exec] FAIL dev/g2/shell/run.sh: sets an EXIT trap and execs; the trap never fires
+```
+
+After: `[check-trap-exec] OK: no script execs past an EXIT trap`. The
+two forms side by side in a scratch script (`mktemp -d`, `EXIT` trap,
+then a command that exits 3): with `exec`, exit 3 and the directory is
+left behind; without it, exit 3 and the directory is gone. The shell
+itself needs a GUI session, so `make test-shell` on a dev Mac is the
+end-to-end check.

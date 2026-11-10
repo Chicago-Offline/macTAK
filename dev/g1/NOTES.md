@@ -1320,6 +1320,23 @@ OpenSSL 3, for a TAK-style `serverAuth,clientAuth` leaf as well:
 `server-eku`, `server-noeku`, `server-both` ACCEPT before and after;
 `client-only` ACCEPT before, REJECT (26 invalid purpose) after.
 
+OpenTAKServer's pinned profiles through real commo, on `ba7cef6`
+(dispatch run 42851764473):
+
+```text
+[tls-test] ok   ots-server: accept
+    headless: iface-up
+[tls-test] ok   ots-client: refuse
+    commo[ERROR] Error trying to make network connection for ssl:127.0.0.1:18093 - will retry (server certificate failed verification - check truststore)
+    headless: iface-error CONN_SSL_PEER_CERT_NOT_TRUSTED
+[tls-test] PASS: server certs accepted, client-only impostors refused (OpenTAKServer profiles included)
+```
+
+The drift check, same day: `[check-ots-profiles] OK: upstream [ client ]
+and [ server ] match the pinned profiles` (this box and the PR's
+`ots-profile-drift` job); exit 1 with `DRIFT [ server ]` on a copy of
+upstream with `clientAuth` removed from the server profile.
+
 Evidence for #2 (this box): `make check-transplants` →
 `[check-transplants] OK: every transplant jar is listed and matches`;
 shellcheck and `actionlint` clean; the hook end to end with the

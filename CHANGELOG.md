@@ -78,6 +78,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A missing or malformed option value is a usage error, exit 2
+  (`dev/g2/NOTES.md` §G2.5, trap #55, G2 correctness audit #6). The
+  Swift shell crashed in an array-index trap when a value option came
+  last (`mactak-shell --out`), and `RenderSmoke` ended in a Java stack
+  trace and exit 1 for the same input or for a non-number. Both now
+  print `<option> needs a value` (or `bad <option> <value>`) and exit 2.
+  `dev/g2/shell/test/args.sh` and `dev/g2/render/test/args.sh` pin it in
+  CI.
+
 - `dev/g2/shell/run.sh` removes its scratch `MACTAK_HOME` again
   (`dev/g2/NOTES.md` §G2.5, trap #54, G2 correctness audit #5). The
   script armed an `EXIT` trap and then `exec`ed the shell binary, which

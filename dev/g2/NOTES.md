@@ -1069,7 +1069,7 @@ fixed on its own branch, in this order.
 | 3 | Medium (latent) | The GLES shim's `glVertexAttribPointer` accepts an array-backed `Buffer`: GL keeps a pointer into a copy that `bufferRelease` frees. Android rejects non-direct buffers there | **Fixed** (branch `g2/gles-shim-direct-buffers`): `bufferDirect` in the generator, guarded by `render/test/gles-shim.sh` |
 | 4 | Low | `Uri.getQueryParameter` leaves `+` as `+`; Android decodes it to a space | **Fixed** (branch `g2/uri-query-plus`), guarded by `render/test/uri.sh` |
 | 5 | Low | `shell/run.sh` leaks its scratch `MACTAK_HOME` every run: the `EXIT` trap never fires after `exec` | **Fixed** (branch `g2/shell-run-scratch-cleanup`): no `exec`, guarded by `dev/check-trap-exec.sh` |
-| 6 | Low | A value option given last crashes the Swift shell (array index out of range); `RenderSmoke` dies with a stack trace instead of usage | Open |
+| 6 | Low | A value option given last crashes the Swift shell (array index out of range); `RenderSmoke` dies with a stack trace instead of usage | **Fixed** (branch `g2/cli-missing-value`), guarded by `shell/test/args.sh` and `render/test/args.sh` |
 | 7 | Low | `WindowApp.teardown` skips EGL destroy when it fails before the context exists; `BitmapRegionDecoder` leaks its file stream; `Canvas.save`/`restore` does not cover the clip; `fetch-angle.sh` pipes `otool` into `grep -q` under `pipefail` (the trap `env.sh` documents); the GLES shim does not bounds-check array offsets | Open |
 
 Not settled by reading: whether the Swift shell exits non-zero when
@@ -1137,6 +1137,21 @@ Traps found on the way (continuing G2 numbering):
   WindowApp reports still reaches the caller. `dev/check-trap-exec.sh`
   (CI lint job, `make lint`) fails any script under `dev/` that arms an
   `EXIT` trap and also `exec`s a command.
+- **#55 — a value option given last indexed past the arguments.** The
+  Swift shell read every option's value with `i += 1; … argv[i]` and
+  checked the bound only for `--classpath`, so `mactak-shell --out` (or
+  any other value option last) died in a Swift array-index trap: no
+  message, and a signal exit instead of the usage code 2. `RenderSmoke`
+  did the same with `args[++i]` and left `Integer.parseInt` unguarded,
+  so `--frames` or `--size 512` ended in a Java stack trace and exit 1,
+  which reads as a render failure. **Guard:** the shell takes every
+  value through `optionValue()`, which exits 2 with `<option> needs a
+  value`; `RenderSmoke` catches the two exceptions around its parse
+  loop and prints `<option> needs a value` or `bad <option> <value>`,
+  then usage, exit 2. `shell/test/args.sh` runs the compiled shell with
+  each of its 15 value options last (CI's shell-compile job; parsing
+  ends before the JVM or a window exists), and `render/test/args.sh`
+  runs six bad invocations through `render/run.sh` (CI's render job).
 
 Evidence for #1 (CI, render job, ANGLE Metal on a hosted runner).
 Before: the canary alone on `be59312`, old gate (dispatch run

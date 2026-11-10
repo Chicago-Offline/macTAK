@@ -1192,10 +1192,19 @@ Traps found on the way (do not rediscover these):
   `serverAuth,clientAuth` included) and rejects a `clientAuth`-only leaf
   with `X509_V_ERR_INVALID_PURPOSE` (26). `test/tls-purpose.sh` pins it
   in CI: one throwaway CA, three leaves presented by
-  `fake-cot-server.py --tls` to an atak-headless SSL client. Still to
-  confirm by hand: a live connection to a real OpenTAKServer, since only
-  a deployment that marks its *server* certificate `clientAuth`-only
-  would now be refused.
+  `fake-cot-server.py --tls` to an atak-headless SSL client.
+  OpenTAKServer's own profiles confirm both sides
+  (`opentakserver/ca_config.py`, upstream master): its server
+  certificate is `[ server ]`, `extendedKeyUsage = critical, clientAuth,
+  serverAuth`, which passes; every user certificate is `[ client ]`,
+  `extendedKeyUsage = critical, clientAuth`, which is exactly the
+  impostor. Certificates signed with those two sections, `critical`
+  flags and keyUsage included, run through commo's `checkCert` logic
+  (OpenSSL 3): `ots-server` ACCEPT before and after; `ots-client` ACCEPT
+  before, REJECT (26) after. So on a stock OpenTAKServer the attack
+  worked before the patch, and the real server stays reachable after it.
+  A live run against an OpenTAKServer is still worth doing when one is
+  next stood up; no server was available on 2026-11-10.
 - **commo's HTTP paths turn TLS verification off** (dormant): ATAK-CIV's
   `simplefileiomanager.cpp`, `missionpackagemanager.cpp` and
   `urlrequestmanager.cpp` set `CURLOPT_SSL_VERIFYPEER`/`VERIFYHOST` to

@@ -56,13 +56,20 @@ public final class TrackStore implements AutoCloseable {
 
     public synchronized void record(CotEvent e, long receivedAtMillis) {
         if (closed) return;   // a receive callback racing shutdown
-        // bind args are Strings only; NULLIF turns an absent callsign into SQL NULL
+        // Bind args are Strings only, so NULLIF turns '' into SQL NULL: an
+        // absent callsign, and an unknown (NaN) hae. Bound as "NaN", sqlite
+        // would keep the text in the REAL column and read it back as 0.0.
         db.execute("INSERT INTO tracks(uid, callsign, type, lat, lon, hae, time, stale, received_at)"
-                + " VALUES (?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?)",
+                + " VALUES (?, NULLIF(?, ''), ?, ?, ?, NULLIF(?, ''), ?, ?, ?)",
                 new String[] {
                     e.uid, e.callsign == null ? "" : e.callsign, e.type,
-                    Double.toString(e.lat), Double.toString(e.lon), Double.toString(e.hae),
+                    Double.toString(e.lat), Double.toString(e.lon), real(e.hae),
                     e.time, e.stale, Long.toString(receivedAtMillis) });
+    }
+
+    /** A finite double as SQL text; NaN/infinite (unknown) as '', which binds NULL. */
+    private static String real(double d) {
+        return Double.isNaN(d) || Double.isInfinite(d) ? "" : Double.toString(d);
     }
 
     public synchronized int count() {
@@ -86,7 +93,8 @@ public final class TrackStore implements AutoCloseable {
             while (c.moveToNext()) {
                 out.add(new Track(new CotEvent(
                         c.getString(0), c.getString(2), "", c.getString(6), c.getString(6), c.getString(7),
-                        c.getDouble(3), c.getDouble(4), c.getDouble(5), Double.NaN, Double.NaN,
+                        c.getDouble(3), c.getDouble(4), c.isNull(5) ? Double.NaN : c.getDouble(5),
+                        Double.NaN, Double.NaN,
                         c.isNull(1) ? null : c.getString(1)), c.getInt(8)));
             }
         } finally {

@@ -243,6 +243,10 @@ public final class HeadlessCLI {
         final AtomicBoolean ifaceUpSeen = new AtomicBoolean(false);
         final AtomicBoolean done = new AtomicBoolean(false);
 
+        // System.exit never returns, so it is called once, after the finally
+        // has closed the tracks DB: from inside the try or a catch it would
+        // skip that close on every failure path.
+        int rc;
         TrackStore tracks = null;
         try {
             // Engine side first: the tracks DB goes through DatabaseImpl's JNI
@@ -394,18 +398,17 @@ public final class HeadlessCLI {
                     + " markerSent=" + markerSent.get());
             // The exit demo: what the tracks DB holds, latest fix per uid.
             System.out.print(tracks.summary(dbPath == null ? "temporary" : dbPath));
-            tracks.close();
-            tracks = null;
-            System.exit(received.get() > 0 && ifaceUpSeen.get() ? 0 : 4);
+            rc = received.get() > 0 && ifaceUpSeen.get() ? 0 : 4;
         } catch (CommoException e) {
             System.err.println("commo[ERROR] stack failure: " + e);
-            System.exit(3);
+            rc = 3;
         } catch (Throwable t) {
             System.err.println("commo[ERROR] fatal: " + t);
-            System.exit(3);
+            rc = 3;
         } finally {
             if (tracks != null) tracks.close();
         }
+        System.exit(rc);
     }
 
     private static byte[] readFile(String path) throws IOException {

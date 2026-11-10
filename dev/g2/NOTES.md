@@ -1067,7 +1067,7 @@ fixed on its own branch, in this order.
 | 1 | High | The basemap leg of the render smoke could not fail: it passed on "content pixels > 0", which the vector layer alone satisfies | **Fixed here**: `ContentGate`, guarded by `render/test/basemap-gate.sh` |
 | 2 | Medium | `android.net.Uri.fromFile` does not encode the path: `#` and `?` truncate it, `%XX` is decoded. The engine opens its databases through it (13 call sites) | **Fixed** (branch `g2/uri-fromfile-encoding`): `fromFile` encodes like Android, guarded by `render/test/uri.sh` |
 | 3 | Medium (latent) | The GLES shim's `glVertexAttribPointer` accepts an array-backed `Buffer`: GL keeps a pointer into a copy that `bufferRelease` frees. Android rejects non-direct buffers there | **Fixed** (branch `g2/gles-shim-direct-buffers`): `bufferDirect` in the generator, guarded by `render/test/gles-shim.sh` |
-| 4 | Low | `Uri.getQueryParameter` leaves `+` as `+`; Android decodes it to a space | Open |
+| 4 | Low | `Uri.getQueryParameter` leaves `+` as `+`; Android decodes it to a space | **Fixed** (branch `g2/uri-query-plus`), guarded by `render/test/uri.sh` |
 | 5 | Low | `shell/run.sh` leaks its scratch `MACTAK_HOME` every run: the `EXIT` trap never fires after `exec` | Open |
 | 6 | Low | A value option given last crashes the Swift shell (array index out of range); `RenderSmoke` dies with a stack trace instead of usage | Open |
 | 7 | Low | `WindowApp.teardown` skips EGL destroy when it fails before the context exists; `BitmapRegionDecoder` leaks its file stream; `Canvas.save`/`restore` does not cover the clip; `fetch-angle.sh` pipes `otool` into `grep -q` under `pipefail` (the trap `env.sh` documents); the GLES shim does not bounds-check array offsets | Open |
@@ -1183,3 +1183,16 @@ After: with `bufferDirect`, on `c01d89f` (PR #90's render job, run
 42882061813): all six `PASS`, `gles-shim-canary: PASS`, and the seven
 engine render smokes after it still `PASS` — the engine passes only
 direct buffers to these entry points.
+
+Evidence for #4 (this box, JDK 21; `bash dev/g2/render/test/uri.sh`).
+Before, seven new query checks against the old `Uri` on the canary
+commit: one fails,
+
+```text
+FAIL: query value: '+' decodes to a space (expected [My Layer], got [My+Layer])
+uri-canary: FAIL (1 check(s))
+```
+
+After, with the fix: 53 `PASS` lines and `uri-canary: PASS`. `%2B`
+still reads back as a literal `+`, and `getQuery()` keeps `+` as it is:
+only parameter values convert it, as on Android.

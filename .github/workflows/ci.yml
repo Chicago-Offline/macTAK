@@ -560,6 +560,12 @@ jobs:
           for s in "${scripts[@]}"; do bash -n "$s"; done
           echo "lint OK: ${#scripts[@]} script(s)"
 
+      - name: No exec past an EXIT trap (dev/check-trap-exec.sh)
+        # exec replaces the shell, so an EXIT trap armed before it never
+        # fires and its cleanup is skipped on every run.
+        if: needs.changes.outputs.changed == 'true'
+        run: bash dev/check-trap-exec.sh
+
       - name: python + powershell syntax (dev/reference/tools)
         # Post-G0-audit coverage gap: lint covered dev/**/*.sh only, so a
         # syntax error in the committed CoT witness rig surfaced mid-

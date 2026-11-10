@@ -60,7 +60,10 @@ if [[ -z "${MACTAK_HOME:-}" ]]; then
   trap 'rm -rf "$SCRATCH"' EXIT
 fi
 
-exec "$BIN" \
+# Not exec: the EXIT trap above must still run to remove the scratch
+# MACTAK_HOME. The shell's exit status (WindowApp's code) becomes ours.
+set +e
+"$BIN" \
   --classpath "$OUT:$CP" \
   --lib "$DIST/libtakengine.dylib" \
   --lib "$DIST/libtakenginejni.dylib" \
@@ -70,3 +73,4 @@ exec "$BIN" \
   --prop "-Dmactak.gdal.data=$GDAL_DATA_DIR" \
   --prop "-Dorg.slf4j.simpleLogger.defaultLogLevel=${MACTAK_LOG_LEVEL:-warn}" \
   ${SHELL_ARGS[@]+"${SHELL_ARGS[@]}"}
+exit $?

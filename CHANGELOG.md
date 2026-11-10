@@ -78,6 +78,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `dev/g2/shell/run.sh` removes its scratch `MACTAK_HOME` again
+  (`dev/g2/NOTES.md` §G2.5, trap #54, G2 correctness audit #5). The
+  script armed an `EXIT` trap and then `exec`ed the shell binary, which
+  replaces bash, so the trap never ran and each run left a directory in
+  `$TMPDIR`. It now runs the binary normally and exits with its status.
+  `dev/check-trap-exec.sh` (CI lint job, `make lint`) fails any `dev/`
+  script that execs past an `EXIT` trap.
+
 - `Uri.getQueryParameter` decodes `+` to a space (`dev/g2/NOTES.md`
   §G2.5, G2 correctness audit #4). The macOS `android.net.Uri` stand-in
   returned `My+Layer` for `?layers=My+Layer`; Android returns

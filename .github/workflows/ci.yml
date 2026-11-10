@@ -50,6 +50,8 @@ jobs:
       - name: Check out macTAK
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Keeps the token (no persist-credentials: false, unlike every
+          # other checkout): the diff step below runs git fetch.
           fetch-depth: 0
 
       - name: Diff against the PR base
@@ -86,6 +88,8 @@ jobs:
     steps:
       - name: Check out macTAK
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Check out upstream ATAK CIV at the pinned commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -95,6 +99,7 @@ jobs:
           path: src
           submodules: recursive
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Install engine dependencies (Homebrew)
         if: needs.changes.outputs.changed == 'true'
@@ -162,6 +167,8 @@ jobs:
     steps:
       - name: Check out macTAK
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Check out upstream ATAK CIV at the pinned commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -171,6 +178,7 @@ jobs:
           path: src
           submodules: recursive
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Install engine dependencies (Homebrew)
         if: needs.changes.outputs.changed == 'true'
@@ -332,6 +340,8 @@ jobs:
     steps:
       - name: Check out macTAK
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Zulu 8 (arm64)
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
@@ -352,6 +362,8 @@ jobs:
     steps:
       - name: Check out macTAK
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Check out upstream ATAK CIV at the pinned commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -361,6 +373,7 @@ jobs:
           path: src
           submodules: recursive
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Install comms dependencies (Homebrew)
         # build-commo.sh preflight list; protoc ships with protobuf
@@ -401,6 +414,8 @@ jobs:
     steps:
       - name: Check out macTAK
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Check out upstream ATAK CIV at the pinned commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -410,6 +425,7 @@ jobs:
           path: src
           submodules: recursive
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up Zulu 8 (arm64)
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
@@ -495,6 +511,8 @@ jobs:
     steps:
       - name: Check out macTAK
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: actionlint (all workflow files)
         uses: rhysd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12

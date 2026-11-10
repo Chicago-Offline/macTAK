@@ -299,6 +299,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- CI checkouts no longer leave the job token on disk
+  (`dev/g1/NOTES.md` §G1.14, G1 security audit #12). 14 checkouts in
+  `ci.yml`, `cot-roundtrip.yml` and `docs.yml` now set
+  `persist-credentials: false`, as `supply-chain.yml` already did, so the
+  token is not in `.git/config` while build scripts and Homebrew-installed
+  tools run. The token is read-only and job-scoped; this is defence in
+  depth. The two `changes` jobs keep it for their `git fetch`.
+
 - The TLS server-purpose canary now covers OpenTAKServer's own
   certificate profiles (`dev/g1/NOTES.md` §G1.14, G1 security audit #1).
   `dev/g1/headless/test/tls-purpose.sh` signs a leaf with each profile

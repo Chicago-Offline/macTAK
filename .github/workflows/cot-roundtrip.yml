@@ -65,6 +65,13 @@ jobs:
       - name: Build comms stack (dev/g1/build-commo.sh, verbatim)
         run: bash dev/g1/build-commo.sh
 
+      - name: TLS server-purpose canary (test/tls-purpose.sh)
+        # G1.14 security audit #1: commo must accept a server cert
+        # (serverAuth, or no EKU) and refuse a same-CA clientAuth-only
+        # impostor. Three legs, each a fake-cot-server.py --tls presenting
+        # one cert to an atak-headless SSL client (ports 18089-18091).
+        run: bash dev/g1/headless/test/tls-purpose.sh
+
       - name: Start hermetic CoT server (fake-cot-server.py, port 8087)
         run: |
           nohup python3 dev/g1/headless/fake-cot-server.py 8087 > /tmp/cot-server.log 2>&1 < /dev/null &

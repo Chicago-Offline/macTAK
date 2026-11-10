@@ -1151,7 +1151,7 @@ and its password. Six findings; each lands as its own focused PR.
 
 | # | Severity | Finding | Status |
 |---|---|---|---|
-| 1 | High | commo accepts any server cert that chains to the truststore CA: no TLS-server purpose check, and no hostname check (deliberate upstream, per ATAK) | Fix in a follow-up PR: commo patch adding the purpose check (Option A), with a TLS fake-server CI test |
+| 1 | High | commo accepts any server cert that chains to the truststore CA: no TLS-server purpose check, and no hostname check (deliberate upstream, per ATAK) | **Fixed** (branch `g1/commo-tls-server-purpose`): `patches/commo/0002-sslcertchecker-require-server-purpose.patch`, guarded by `test/tls-purpose.sh` |
 | 2 | Medium | Transplant jars not fully integrity-checked: slf4j jars unlisted, CI never verified hashes | **Fixed here** |
 | 3 | Low | Inbound CoT printed raw to the terminal: escape-sequence injection | Fix in a follow-up PR |
 | 4 | Low (dormant) | commo's curl paths (file transfer, mission packages, URL requests) set `VERIFYPEER`/`VERIFYHOST` to 0 | Recorded below; unused by atak-headless today |
@@ -1175,6 +1175,36 @@ Traps found on the way (do not rediscover these):
   mismatch or an unlisted jar. It is the single check behind the hook,
   `make check-transplants` and an unconditional CI lint step. A
   one-byte flip in a copy fails it with `slf4j-api-1.7.30.jar: FAILED`.
+- **commo trusted any certificate its CA had signed, client certs
+  included.** `SSLCertChecker::checkCert` verified the server's chain
+  with `X509_verify_cert` and no purpose, and commo skips the hostname
+  check by design (ATAK parity). TAK deployments issue client and server
+  certificates from one CA, so a `clientAuth`-only certificate (any
+  enrolled user's, or a leaked data package's) passed as the server.
+  Proven end to end on unpatched commo (before, below): the impostor
+  leg connects. **Guard:**
+  `patches/commo/0002-sslcertchecker-require-server-purpose.patch`
+  sets `X509_PURPOSE_SSL_SERVER` on the store context. It also adds
+  `#include "openssl/x509v3.h"`: the file's existing OpenSSL headers
+  don't declare the constant, so the bare one-liner would not have
+  compiled. OpenSSL's server purpose accepts a leaf with `serverAuth` or
+  with no extendedKeyUsage at all (TAK Server's
+  `serverAuth,clientAuth` included) and rejects a `clientAuth`-only leaf
+  with `X509_V_ERR_INVALID_PURPOSE` (26). `test/tls-purpose.sh` pins it
+  in CI: one throwaway CA, three leaves presented by
+  `fake-cot-server.py --tls` to an atak-headless SSL client.
+  OpenTAKServer's own profiles confirm both sides
+  (`opentakserver/ca_config.py`, upstream master): its server
+  certificate is `[ server ]`, `extendedKeyUsage = critical, clientAuth,
+  serverAuth`, which passes; every user certificate is `[ client ]`,
+  `extendedKeyUsage = critical, clientAuth`, which is exactly the
+  impostor. Certificates signed with those two sections, `critical`
+  flags and keyUsage included, run through commo's `checkCert` logic
+  (OpenSSL 3): `ots-server` ACCEPT before and after; `ots-client` ACCEPT
+  before, REJECT (26) after. So on a stock OpenTAKServer the attack
+  worked before the patch, and the real server stays reachable after it.
+  A live run against an OpenTAKServer is still worth doing when one is
+  next stood up; no server was available on 2026-11-10.
 - **commo's HTTP paths turn TLS verification off** (dormant): ATAK-CIV's
   `simplefileiomanager.cpp`, `missionpackagemanager.cpp` and
   `urlrequestmanager.cpp` set `CURLOPT_SSL_VERIFYPEER`/`VERIFYHOST` to
@@ -1182,7 +1212,35 @@ Traps found on the way (do not rediscover these):
   Whoever wires data-package or mission sync (G6 rung 5) must patch
   these first; this entry is the reminder.
 
-Evidence (this box): `make check-transplants` →
+Evidence for #1 (CI, `cot-roundtrip.yml` dispatch runs). Before: the
+test alone on `8b38d91`, unpatched commo (run 42741415679):
+
+```text
+[tls-test] ok   server-eku: accept
+[tls-test] ok   server-noeku: accept
+[tls-test] FAIL impostor: expected refuse
+    headless: connecting 127.0.0.1:18091 ssl cert=client.p12 uid=tls-test-impostor callsign=TLS-impostor
+    headless: iface-up
+```
+
+After: with the patch, on `237d36d` (run 42743222107):
+
+```text
+[g1-commo]   applied 0002-sslcertchecker-require-server-purpose.patch
+[tls-test] ok   server-eku: accept
+[tls-test] ok   server-noeku: accept
+[tls-test] ok   impostor: refuse
+    headless: iface-error CONN_SSL_PEER_CERT_NOT_TRUSTED
+[tls-test] PASS: server certs accepted, client-only impostor refused
+[g1-roundtrip] PASS — both ifaces up, B's presence+marker relayed to A, A's presence relayed to B, both persisted in the tracks DBs
+```
+
+The same rule, checked in C against commo's `checkCert` logic on
+OpenSSL 3, for a TAK-style `serverAuth,clientAuth` leaf as well:
+`server-eku`, `server-noeku`, `server-both` ACCEPT before and after;
+`client-only` ACCEPT before, REJECT (26 invalid purpose) after.
+
+Evidence for #2 (this box): `make check-transplants` →
 `[check-transplants] OK: every transplant jar is listed and matches`;
 shellcheck and `actionlint` clean; the hook end to end with the
 manifest staged → `[pre-commit] OK`.

@@ -7,7 +7,9 @@
 # Output: dev/g2/build/fixtures/sf-graticule.mbtiles (gitignored; ~1 MB,
 # regenerated on demand — CI builds it in the render-angle job).
 #
-# Usage: dev/g2/fixtures/make-basemap.sh [out.mbtiles]
+# Usage: dev/g2/fixtures/make-basemap.sh [out.mbtiles [WEST SOUTH EAST NORTH]]
+#        (bounds default to the sf-landmarks area; render/test/basemap-gate.sh
+#        passes others to build a basemap that misses the camera frame)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # <repo>/dev/g2/fixtures
@@ -23,10 +25,10 @@ JDK="${JAVA_HOME:-$("/usr/libexec/java_home" -v 1.8 2>/dev/null || true)}"
 [[ -n "$JDK" ]] || { echo "make-basemap: JDK 1.8 not found" >&2; exit 1; }
 
 # sf-landmarks.geojson bounds + margin; 16000 px/deg ≈ 7 m/px at 37.8°N (≈ zoom 14)
-WEST=-122.56; SOUTH=37.72; EAST=-122.34; NORTH=37.87; PPD=16000
+WEST="${2:--122.56}"; SOUTH="${3:-37.72}"; EAST="${4:--122.34}"; NORTH="${5:-37.87}"; PPD=16000
 
 "$JDK/bin/javac" -d "$WORK" "$HERE/MakeBasemap.java"
-"$JDK/bin/java" -Djava.awt.headless=true -cp "$WORK" MakeBasemap "$WORK/graticule.png" $WEST $SOUTH $EAST $NORTH $PPD
+"$JDK/bin/java" -Djava.awt.headless=true -cp "$WORK" MakeBasemap "$WORK/graticule.png" "$WEST" "$SOUTH" "$EAST" "$NORTH" "$PPD"
 
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"

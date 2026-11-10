@@ -78,6 +78,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The render smoke's basemap leg can now fail (`dev/g2/NOTES.md` §G2.5,
+  trap #51, G2 correctness audit #1). `RenderSmoke` and `WindowApp`
+  passed on "content pixels > 0", which the vector layer drawn over the
+  basemap satisfies by itself (23890 of 262144 px in CI), so a basemap
+  that never rendered still read `PASS`. `ContentGate` now requires
+  content to cover half the frame when a basemap is attached, for the
+  poll loop and the verdict alike. `dev/g2/render/test/basemap-gate.sh`
+  (CI, `make test-render`) builds a basemap that misses the camera frame
+  and requires the smoke to fail. `fixtures/make-basemap.sh` takes
+  optional bounds for it.
+
 - commo's `closeSocket` diagnostic printed twice per close
   (`dev/g1/patches/commo/0001-diag-socketRead-errno.patch`, found in the
   G1 security audit's native-code read, `dev/g1/NOTES.md` §G1.14). The

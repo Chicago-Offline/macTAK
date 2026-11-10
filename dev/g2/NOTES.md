@@ -1054,3 +1054,42 @@ PASS; `make test` PASS; `make test-render` 3/3 (0 KHR_debug),
 `make lint`. Nothing else changes in the glue: the only new exports are
 `Java_com_atakmap_map_gdal_VSIJFileFilesystemHandler_installFilesystemHandler`
 and the two classes. Stacked on #68 (b.2) because the gate is b.2's smoke.
+
+## G2.5 — correctness audit, pass 1 (2026-11-10, branch `g2/basemap-gate-coverage` and follow-ups)
+
+First correctness read of `dev/g2`: the `android.*` stand-ins, the EGL
+and GLES natives, the render harnesses (`RenderSmoke`, `WindowApp`), the
+Swift shell and the scripts. Findings, highest priority first; each is
+fixed on its own branch, in this order.
+
+| # | Severity | Finding | Status |
+|---|---|---|---|
+| 1 | High | The basemap leg of the render smoke could not fail: it passed on "content pixels > 0", which the vector layer alone satisfies | **Fixed here**: `ContentGate`, guarded by `render/test/basemap-gate.sh` |
+| 2 | Medium | `android.net.Uri.fromFile` does not encode the path: `#` and `?` truncate it, `%XX` is decoded. The engine opens its databases through it (13 call sites) | Open |
+| 3 | Medium (latent) | The GLES shim's `glVertexAttribPointer` accepts an array-backed `Buffer`: GL keeps a pointer into a copy that `bufferRelease` frees. Android rejects non-direct buffers there | Open |
+| 4 | Low | `Uri.getQueryParameter` leaves `+` as `+`; Android decodes it to a space | Open |
+| 5 | Low | `shell/run.sh` leaks its scratch `MACTAK_HOME` every run: the `EXIT` trap never fires after `exec` | Open |
+| 6 | Low | A value option given last crashes the Swift shell (array index out of range); `RenderSmoke` dies with a stack trace instead of usage | Open |
+| 7 | Low | `WindowApp.teardown` skips EGL destroy when it fails before the context exists; `BitmapRegionDecoder` leaks its file stream; `Canvas.save`/`restore` does not cover the clip; `fetch-angle.sh` pipes `otool` into `grep -q` under `pipefail` (the trap `env.sh` documents); the GLES shim does not bounds-check array offsets | Open |
+
+Not settled by reading: whether the Swift shell exits non-zero when
+`WindowApp` fails. `NSApp.terminate` normally ends the process itself;
+§M3.2 quotes `exiting with WindowApp's code 0` from a passing run, which
+does not distinguish the two. A failing `make test-shell` run on a dev
+Mac, followed by `echo $?`, would.
+
+Traps found on the way (continuing G2 numbering):
+
+- **#51 — "content pixels > 0" proves the top layer, not the stack.**
+  The basemap step runs `--basemap … --layer …`. The sf-landmarks
+  vectors alone light 23890 of 262144 px; the graticule basemap under
+  them fills all 262144 (CI, PR #87's render job). Either count passed,
+  so a basemap that never drew read `PASS`. The poll loop had the same
+  bar, so it could also stop waiting once the vectors landed, before
+  the tiles did. **Guard:** `ContentGate.requiredPixels` sets one bar
+  for the poll and the verdict: with a basemap attached, content must
+  cover half the frame (`BASEMAP_MIN_COVER`); with only vector layers,
+  one pixel. `render/test/basemap-gate.sh` is the negative canary, in
+  CI and `make test-render`: the same graticule built over the Oakland
+  hills, east of the camera frame, must make the smoke exit 1 with
+  `FAIL: basemap attached but content covers …`.

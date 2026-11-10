@@ -255,6 +255,10 @@ jobs:
         if: needs.changes.outputs.changed == 'true'
         run: bash dev/g2/render/test/gles-shim.sh
 
+      - name: RenderSmoke argument canary (bad arguments are exit 2, not a stack trace)
+        if: needs.changes.outputs.changed == 'true'
+        run: bash dev/g2/render/test/args.sh
+
       - name: GLMapView → EGL pbuffer render smoke (no layers)
         if: needs.changes.outputs.changed == 'true'
         env:
@@ -367,6 +371,12 @@ jobs:
       - name: Compile the shell (build-shell.sh, no run)
         if: needs.changes.outputs.changed == 'true'
         run: make build-shell
+
+      - name: Shell argument canary (a missing option value is exit 2, not a crash)
+        # Runs the compiled shell; parsing ends before the JVM or a window
+        # exists, so no GUI session is needed (dev/g2/shell/test/args.sh).
+        if: needs.changes.outputs.changed == 'true'
+        run: bash dev/g2/shell/test/args.sh
 
   commo-stack:
     name: comms stack (macOS arm64)

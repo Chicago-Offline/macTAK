@@ -94,29 +94,38 @@ func parseDouble(_ s: String, _ what: String) -> Double {
 var o = ShellOptions()
 var argv = Array(CommandLine.arguments.dropFirst())
 var i = 0
+
+/// The value of the option at argv[i]; advances i onto it. A value option
+/// given last used to index past the end of argv, a Swift runtime trap with
+/// no message; it is a usage error (exit 2) like any other.
+func optionValue() -> String {
+    let opt = argv[i]
+    i += 1
+    guard i < argv.count else { shellFail("\(opt) needs a value") }
+    return argv[i]
+}
 while i < argv.count {
     switch argv[i] {
     case "--classpath":
-        i += 1; guard i < argv.count else { shellFail("--classpath needs a value") }
-        o.classpath = argv[i]
-    case "--lib": i += 1; o.libs.append(argv[i])
-    case "--prop": i += 1; o.props.append(argv[i])
-    case "--egl": i += 1; o.egl = argv[i]
-    case "--gles": i += 1; o.gles = argv[i]
-    case "--size": i += 1; (o.w, o.h) = parseSize(argv[i], "size")
-    case "--frames": i += 1; o.frames = Int(argv[i]) ?? 0
-    case "--settle": i += 1; o.settleMs = Int64(argv[i]) ?? -1
-    case "--linger": i += 1; o.lingerMs = Int64(argv[i]) ?? -1
+        o.classpath = optionValue()
+    case "--lib": o.libs.append(optionValue())
+    case "--prop": o.props.append(optionValue())
+    case "--egl": o.egl = optionValue()
+    case "--gles": o.gles = optionValue()
+    case "--size": (o.w, o.h) = parseSize(optionValue(), "size")
+    case "--frames": o.frames = Int(optionValue()) ?? 0
+    case "--settle": o.settleMs = Int64(optionValue()) ?? -1
+    case "--linger": o.lingerMs = Int64(optionValue()) ?? -1
     case "--wait": o.wait = true
-    case "--out": i += 1; o.out = argv[i]
-    case "--layer": i += 1; o.layers.append(argv[i])
-    case "--basemap": i += 1; o.basemaps.append(argv[i])
-    case "--layer-db": i += 1; o.layerDb = argv[i]
-    case "--res": i += 1; o.res = parseDouble(argv[i], "res")
+    case "--out": o.out = optionValue()
+    case "--layer": o.layers.append(optionValue())
+    case "--basemap": o.basemaps.append(optionValue())
+    case "--layer-db": o.layerDb = optionValue()
+    case "--res": o.res = parseDouble(optionValue(), "res")
     case "--at":
-        i += 1
-        let ll = argv[i].split(separator: ",", maxSplits: 1).map(String.init)
-        guard ll.count == 2 else { shellFail("bad --at \(argv[i]) (want LAT,LON)") }
+        let at = optionValue()
+        let ll = at.split(separator: ",", maxSplits: 1).map(String.init)
+        guard ll.count == 2 else { shellFail("bad --at \(at) (want LAT,LON)") }
         o.atLat = parseDouble(ll[0], "at"); o.atLon = parseDouble(ll[1], "at")
     case "-h", "--help", "--usage":
         print(USAGE); exit(0)

@@ -94,44 +94,61 @@ public final class RenderSmoke {
         long settleMs = 3000;
         double res = Double.NaN;
         double atLat = Double.NaN, atLon = Double.NaN;
-        for (int i = 0; i < args.length; i++) {
-            switch (args[i]) {
-                case "--lib": libs.add(args[++i]); break;
-                case "--egl": egl = args[++i]; break;
-                case "--gles": gles = args[++i]; break;
-                case "--out": out = args[++i]; break;
-                case "--frames": frames = Integer.parseInt(args[++i]); break;
-                case "--layer": layers.add(new File(args[++i])); break;
-                case "--basemap": basemaps.add(new File(args[++i])); break;
-                case "--layer-db": layerDb = args[++i]; break;
-                case "--res": res = Double.parseDouble(args[++i]); break;
-                case "--at": {
-                    String[] ll = args[++i].split(",");
-                    atLat = Double.parseDouble(ll[0]); atLon = Double.parseDouble(ll[1]);
-                    break;
+        // opt and its index outlive the loop so the catch can tell a missing
+        // value (nothing follows the option) from a malformed one.
+        int argIndex = 0;
+        String opt = null;
+        try {
+            for (int i = 0; i < args.length; i++) {
+                opt = args[i];
+                argIndex = i;
+                switch (args[i]) {
+                    case "--lib": libs.add(args[++i]); break;
+                    case "--egl": egl = args[++i]; break;
+                    case "--gles": gles = args[++i]; break;
+                    case "--out": out = args[++i]; break;
+                    case "--frames": frames = Integer.parseInt(args[++i]); break;
+                    case "--layer": layers.add(new File(args[++i])); break;
+                    case "--basemap": basemaps.add(new File(args[++i])); break;
+                    case "--layer-db": layerDb = args[++i]; break;
+                    case "--res": res = Double.parseDouble(args[++i]); break;
+                    case "--at": {
+                        String[] ll = args[++i].split(",");
+                        atLat = Double.parseDouble(ll[0]); atLon = Double.parseDouble(ll[1]);
+                        break;
+                    }
+                    case "--settle": settleMs = Long.parseLong(args[++i]); break;
+                    case "--size": {
+                        String[] wh = args[++i].split("x");
+                        w = Integer.parseInt(wh[0]); h = Integer.parseInt(wh[1]);
+                        break;
+                    }
+                    case "--resize": {
+                        String[] wh = args[++i].split("x");
+                        resizeW = Integer.parseInt(wh[0]); resizeH = Integer.parseInt(wh[1]);
+                        if (resizeW <= 0 || resizeH <= 0) { System.err.print(USAGE); System.exit(2); }
+                        break;
+                    }
+                    case "--window-host": windowHostLib = args[++i]; break;
+                    case "--window": {
+                        String[] wh = args[++i].split("x");
+                        w = Integer.parseInt(wh[0]); h = Integer.parseInt(wh[1]);
+                        if (w <= 0 || h <= 0) { System.err.print(USAGE); System.exit(2); }
+                        windowMode = true;
+                        break;
+                    }
+                    default: System.err.print(USAGE); System.exit(2);
                 }
-                case "--settle": settleMs = Long.parseLong(args[++i]); break;
-                case "--size": {
-                    String[] wh = args[++i].split("x");
-                    w = Integer.parseInt(wh[0]); h = Integer.parseInt(wh[1]);
-                    break;
-                }
-                case "--resize": {
-                    String[] wh = args[++i].split("x");
-                    resizeW = Integer.parseInt(wh[0]); resizeH = Integer.parseInt(wh[1]);
-                    if (resizeW <= 0 || resizeH <= 0) { System.err.print(USAGE); System.exit(2); }
-                    break;
-                }
-                case "--window-host": windowHostLib = args[++i]; break;
-                case "--window": {
-                    String[] wh = args[++i].split("x");
-                    w = Integer.parseInt(wh[0]); h = Integer.parseInt(wh[1]);
-                    if (w <= 0 || h <= 0) { System.err.print(USAGE); System.exit(2); }
-                    windowMode = true;
-                    break;
-                }
-                default: System.err.print(USAGE); System.exit(2);
             }
+        } catch (ArrayIndexOutOfBoundsException | NumberFormatException e) {
+            // Nothing after the option: it had no value. Otherwise the value
+            // did not parse ("--frames many", "--size 512", "--at 37.8").
+            final boolean missing = argIndex + 1 >= args.length;
+            System.err.println("render-smoke: " + (missing
+                    ? opt + " needs a value"
+                    : "bad " + opt + " " + args[argIndex + 1]));
+            System.err.print(USAGE);
+            System.exit(2);
         }
         if (libs.isEmpty() || egl == null || gles == null) { System.err.print(USAGE); System.exit(2); }
         if (windowMode && windowHostLib == null) { System.err.print(USAGE); System.exit(2); }

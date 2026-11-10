@@ -289,6 +289,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   caught by the G1.9 kernel-mode pin `GetFileCountOfADirectory`, which
   failed 0-vs-2 on the first healthy-boot run)
 
+### Security
+
+- commo TLS: the server certificate must now be fit for a TLS *server*
+  (`dev/g1/NOTES.md` §G1.14, G1 security audit #1, High). Commo verified
+  only that the server's certificate chained to the truststore CA, and
+  skips hostname checks by design, so a same-CA `clientAuth`-only
+  certificate (any enrolled user's) could impersonate the TAK server.
+  `dev/g1/patches/commo/0002-sslcertchecker-require-server-purpose.patch`
+  sets `X509_PURPOSE_SSL_SERVER` in `SSLCertChecker::checkCert`, which
+  still accepts `serverAuth` and no-EKU server certificates.
+  `dev/g1/headless/test/tls-purpose.sh` (CI: `cot-roundtrip.yml`;
+  `make test-tls`) gives `fake-cot-server.py` a `--tls` mode and pins
+  accept, accept, refuse. The impostor leg connects on unpatched commo
+  and is refused with `CONN_SSL_PEER_CERT_NOT_TRUSTED` after.
+- Transplant jar integrity is now enforced (`dev/g1/NOTES.md` §G1.14,
+  G1 security audit): `dev/g1/transplants/SHA256SUMS` never listed the
+  two slf4j jars, and the pre-commit hook's `shasum -c` only checks listed
+  files, so an unlisted or swapped jar passed silently. CI never checked
+  transplant hashes at all, though it loads these jars into a JVM next to
+  native code. The slf4j hashes are added (both jars match Maven Central's
+  published SHA-1). `dev/check-transplants.sh` fails on a mismatch *or* an
+  unlisted jar; it backs the pre-commit hook, `make check-transplants` and
+  a CI lint step that runs on every PR.
+
 ## [0.3.1] - 2026-11-07 — G2: window surfaces (M3.0–M3.1) + hardening
 
 ### Added

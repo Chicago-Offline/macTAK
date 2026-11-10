@@ -11,13 +11,16 @@ with no trailing newline, so newline framing would glue each event to the
 next one's prolog); each client gets its own accumulation buffer so an
 event split across recv() boundaries is forwarded once, whole. The prolog
 is dropped and the bare '<event>...</event>\n' is relayed. usage:
-fake-cot-server.py [PORT] (env PORT overrides; default 8087). Runs until
-SIGTERM.
+fake-cot-server.py [PORT] [--tls CERT KEY] (env PORT overrides; default
+8087). --tls serves TLS with that PEM cert/key and requests no client cert:
+test/tls-purpose.sh uses it to present a server cert, or a client-only
+impostor cert, to commo (G1.14). Runs until SIGTERM.
 """
 import datetime
 import os
 import signal
 import socket
+import ssl
 import sys
 import time
 RUNNING, FMT = [True], "%Y-%m-%dT%H:%M:%S.%f"
@@ -61,14 +64,40 @@ def relay(clients, sender, payload):
             drop(clients, peer, "send-failed")
 
 
+def parse_args(argv):
+    """[PORT] [--tls CERT KEY] -> (port, tls_context or None)."""
+    args = list(argv)
+    tls = None
+    if "--tls" in args:
+        i = args.index("--tls")
+        if i + 2 >= len(args):
+            sys.exit("usage: fake-cot-server.py [PORT] [--tls CERT KEY]")
+        tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls.load_cert_chain(args[i + 1], args[i + 2])
+        del args[i:i + 3]
+    port = int(args[0]) if args else int(os.environ.get("PORT", "8087"))
+    return port, tls
+
+
+def accept_tls(sock, tls):
+    """Blocking TLS handshake (bounded), then back to non-blocking."""
+    sock.settimeout(5.0)
+    try:
+        return tls.wrap_socket(sock, server_side=True)
+    except (ssl.SSLError, OSError) as e:
+        print("fake-cot: tls handshake failed: %s" % e, flush=True)
+        sock.close()
+        return None
+
+
 def main():
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", "8087"))
+    port, tls = parse_args(sys.argv[1:])
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("127.0.0.1", port))
     srv.listen(8)
     srv.setblocking(False)
-    print("fake-cot: listening on 127.0.0.1:%d" % port, flush=True)
+    print("fake-cot: listening on 127.0.0.1:%d%s" % (port, " (tls)" if tls else ""), flush=True)
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
 
@@ -79,8 +108,9 @@ def main():
                 continue
             try:
                 data = sock.recv(4096)
-            except (BlockingIOError, InterruptedError):
-                continue
+            except (BlockingIOError, InterruptedError,
+                    ssl.SSLWantReadError, ssl.SSLWantWriteError):
+                continue  # TLS: "no record yet" is not a dead peer
             except OSError:
                 drop(clients, sock, "errored")
                 continue
@@ -106,6 +136,10 @@ def main():
                 drop(clients, sock, "disconnected")
         try:  # accept new clients
             sock, addr = srv.accept()
+            if tls:
+                sock = accept_tls(sock, tls)
+                if sock is None:
+                    continue
             sock.setblocking(False)
             clients[sock] = bytearray()
             print("fake-cot: client connected %s" % (addr,), flush=True)

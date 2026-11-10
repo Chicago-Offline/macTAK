@@ -967,3 +967,82 @@ Compile gate: the launcher's file set under `-source 8 -Xlint:all
 -Werror` (plus `-Xlint:-options` on JDK 21) compiled 22 classes against
 commo's API from the pin and the transplant jars. `datapackage.sh`:
 `datapackage-selftest: ALL PASS`. shellcheck and markdownlint: 0 issues.
+
+## G1.12 — GDAL 3 axis order on the C++ OGR path (2026-11-10, residual of G2 trap #48)
+
+Found in audit pass 3. G2.4b b.2 pinned `OAMS_TRADITIONAL_GIS_ORDER` on
+the Java SRSes (`GdalLibrary.EPSG_4326`, `GdalDatasetProjection2`); the
+engine's C++ builds its own. `OGR_Content2::getLayerTransform`, the
+offline-layer path behind `atak-headless --layer` and G2's
+`--layer` render, transforms any layer whose SRS isn't EPSG:4326 to a
+plain `importFromEPSG(4326)`. On GDAL ≥ 3 that target is lat,lon by
+authority order, and the engine reads x as longitude. The same shape is in
+`OGRFeatureDataStore`, `OSRProjectionSpi`, `GdalDatasetProjection`,
+`jgdallibrary.cpp` and `josrutils.cpp`.
+
+```sh
+bash dev/g1/headless/test/layer.sh   # CI: native-engine + render-angle
+```
+
+### The patch
+
+`dev/g1/patches/gdal3-axis-order-cpp-default.patch` sets
+`OSR_DEFAULT_AXIS_MAPPING_STRATEGY=TRADITIONAL_GIS_ORDER` as the first
+statement of the engine's native `GdalLibrary::initImpl`, before
+`GDALAllRegister`. GDAL ≥ 3.5 reads it whenever an `OGRSpatialReference`
+is constructed, so every C++ SRS from then on is lon,lat, exactly what
+GDAL 2.4 gave the engine. One line covers all the sites above, plus any
+not yet reached. Per-site `SetAxisMappingStrategy` calls would have to
+find every SRS the engine builds. CI's Homebrew GDAL is 3.13.3.
+
+Every OGR layer path reaches `initImpl` first: `LayerStore`'s
+constructor calls `NativeGdal.init` before it registers the provider, and
+G2's `RenderSmoke`/`WindowApp` open layers through `LayerStore`.
+
+Traps found on the way (do not rediscover these):
+
+- **The engine's C++ OGR transforms swapped lat/lon on GDAL 3** for any
+  layer in a projected CRS. Witness, a GDAL 3.8 program mirroring
+  `getLayerTransform` on files `layer.sh` now builds:
+  `u.shp layer auth=32610 engine-transform x=37.7955 y=-122.3937`. That's
+  Ferry Building's latitude in the longitude slot. EPSG:4326 layers skip
+  the transform, which is why every committed fixture passed. **Guard:**
+  the patch above; `layer.sh` opens a UTM 10N shapefile and an EPSG:3857
+  GeoPackage built from the fixture and checks Ferry Building's position.
+- **A feature-count canary can't see swapped axes.** `layer.sh` passed
+  with every coordinate flipped, because the counts still matched.
+  **Guard:** every fixture-derived leg now checks Ferry Building's
+  envelope (37.7955, −122.3937, within 1e-4°) as `LayerCLI` prints it.
+
+Evidence (CI, `ci.yml`, `native-engine` job). Before: a dispatch run on
+the guard-only commit `fb844ba` (run 42724928764). The EPSG:4326 legs
+pass and both projected legs fail with the axes swapped. Note the
+count-only `PASS` line under the flipped envelope: the old canary
+passed this layer.
+
+```text
+[layer-test] ok   sf-points.shp (3 feature(s))
+[layer-test] FAIL sf-points-utm10n.shp: Ferry Building at lat/lon -122.39370 37.79550, expected 37.7955 -122.3937
+      fid 4294967297   set 1   Ferry Building               Point              [-122.39370 37.79550 .. -122.39370 37.79550]
+    PASS: 3 feature(s) opened through FeatureDataStore2
+[layer-test] FAIL sf-landmarks-3857.gpkg: Ferry Building at lat/lon -122.39370 37.79550, expected 37.7955 -122.3937
+[layer-test] FAIL
+```
+
+After: PR #76's run with the patch (head `3738696`, run 42726706344):
+
+```text
+[layer-test] ok   sf-points-utm10n.shp (3 feature(s))
+      fid 4294967297   set 1   Ferry Building               Point              [37.79550 -122.39370 .. 37.79550 -122.39370]
+[layer-test] ok   sf-landmarks-3857.gpkg (8 feature(s))
+      fid 4294967297   set 1   Ferry Building               Point              [37.79550 -122.39370 .. 37.79550 -122.39370]
+[layer-test] PASS: offline layer(s) opened through FeatureDataStore2
+```
+
+`render-angle` shows the same pair: it fails on `fb844ba` and passes on
+`3738696`. That run also keeps the Java path green: its "Engine GDAL
+georeferencing on GDAL 3" step (`make test-gdal-projection`) passes with
+the process-wide option set. The GPKG legs' `no such column:
+definition_12_063` line shows up before and after, and on main's
+EPSG:4326 leg too. It's G1.3's known-benign noise, unrelated to this
+change.

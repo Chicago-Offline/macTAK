@@ -78,6 +78,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `Uri.getQueryParameter` decodes `+` to a space (`dev/g2/NOTES.md`
+  §G2.5, G2 correctness audit #4). The macOS `android.net.Uri` stand-in
+  returned `My+Layer` for `?layers=My+Layer`; Android returns
+  `My Layer`. `%2B` still reads back as a literal `+`, and `getQuery()`
+  is unchanged. Seven query checks join `dev/g2/render/test/uri.sh`.
+
 - The GLES shim refuses an array-backed `Buffer` for vertex arrays
   (`dev/g2/NOTES.md` §G2.5, trap #53, G2 correctness audit #3).
   `glVertexAttribPointer` and `glVertexAttribIPointer` passed GL a

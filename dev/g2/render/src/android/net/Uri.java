@@ -104,7 +104,9 @@ public final class Uri implements Comparable<Uri> {
         for (String kv : query.split("&")) {
             int eq = kv.indexOf('=');
             String k = eq < 0 ? kv : kv.substring(0, eq);
-            if (decode(k).equals(key)) return eq < 0 ? "" : decode(kv.substring(eq + 1));
+            // A '+' in a query value is a space (form encoding), as on
+            // Android since API 16; a literal plus arrives as %2B.
+            if (decode(k).equals(key)) return eq < 0 ? "" : decode(kv.substring(eq + 1).replace("+", "%20"));
         }
         return null;
     }

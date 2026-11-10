@@ -1289,3 +1289,16 @@ mactak-shell: poll → 2
 mactak-shell: render failed — closing the window
 exit=0
 ```
+
+After, on branch `g2/shell-exit-code` (`9ddd87c`), same Mac,
+`make test-shell; echo "exit=$?"`. The first leg renders and passes as
+before; the second leg is the canary:
+
+```text
+bash dev/g2/shell/test/exit-code.sh
+    window-app: no such basemap: /nonexistent.mbtiles
+    mactak-shell: render failed — closing the window
+    mactak-shell: exiting with WindowApp's code 2
+[shell-exit] PASS: a failed render exits 2
+exit=0
+```

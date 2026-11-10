@@ -36,7 +36,15 @@ TEST_F(JniGuardsOnLoad, ReturnsJniErrCleanlyWithoutKernelClasses)
 
 TEST_F(JniGuardsOnLoad, LeavesTheEnvClean)
 {
+    JavaVM *vm = jnitest::boot_jvm();
+    ASSERT_NE(vm, nullptr);
     JNIEnv *env = jnitest::jni_env();
     ASSERT_NE(env, nullptr);
+
+    /* Self-contained: run OnLoad here instead of relying on the test
+     * above having run it. Under --gtest_filter or --gtest_shuffle this
+     * pin otherwise checked an env nothing had touched, and passed
+     * vacuously. A repeat OnLoad only reassigns its globals. */
+    (void)JNI_OnLoad(vm, nullptr);
     EXPECT_FALSE(env->ExceptionCheck());
 }

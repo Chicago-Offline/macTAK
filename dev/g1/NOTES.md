@@ -130,7 +130,8 @@ server; `TAK_HOST`/`TAK_PORT`, default 127.0.0.1:8087).
 ### Diagnostics (patches/commo/0001-diag-socketRead-errno.patch)
 
 Five WARNING-level `[commo-diag]` probes in commo: socketRead
-(errno + local port), both `::close(fd)` sites (local port), sendBroadcast
+(errno + local port), closeSocket (local port; `platform.cpp`'s other
+`::close(fd)` is Android-only netlink code, never built here), sendBroadcast
 (type + ups), the io-tx queue check (q/blocked/doTx), and the io-tx write
 (w/r). Regenerate from the generator repo `g1-commo-gen` (pristine
 core/impl + insert.py; patch must be a scoped `git diff -- core/impl`).
@@ -1156,7 +1157,7 @@ and its password. Six findings; each lands as its own focused PR.
 | 3 | Low | Inbound CoT printed raw to the terminal: escape-sequence injection, and forged `headless:` lines | **Fixed** (branch `g1/sanitize-inbound-log`): `CotXml.printable`, guarded by `CotEventSelfTest` |
 | 4 | Low (dormant) | commo's curl paths (file transfer, mission packages, URL requests) skip the hostname check always, and the chain check when the caller passes no CA or the transfer is peer-hosted | Recorded below (narrowed in pass 2: a caller rule, not a patch); unused by atak-headless today |
 | 5 | Note | `NativeSsl` loads OpenSSL's legacy provider process-wide, not only for the RC2-40 PKCS#12 read | Recorded |
-| 6 | Note | Reviewed, no issue: data-package importer (Zip-Slip, size caps, XXE, no password in logs, 0700 cert dir), `CotEvent` (XXE + §G1.11 validation), `TrackStore` (bound parameters), fake server (loopback only); deep pass: commo's stream framing (fixed 64 KiB buffer, protobuf length capped at it, overflow discards rather than overruns), its XML parse (`XML_PARSE_NONET`, no entity substitution or external DTD), and no listening socket (the mission-package web server starts only after `setupMissionPackageIO`, which atak-headless never calls) | — |
+| 6 | Note | Reviewed, no issue: data-package importer (Zip-Slip, size caps, XXE, no password in logs, 0700 cert dir), `CotEvent` (XXE + §G1.11 validation), `TrackStore` (bound parameters), fake server (loopback only); deep pass: commo's stream framing (fixed 64 KiB buffer, protobuf length capped at it, overflow discards rather than overruns), its XML parse (`XML_PARSE_NONET`, no entity substitution or external DTD), and no listening socket (the mission-package web server starts only after `setupMissionPackageIO`, which atak-headless never calls); native-code read: the 34 engine patches, 2 commo patches and `jni-extra` add only null/exception guards, GL attribute guards and three upstream memory-bug fixes, and touch no buffer except `vsi_jfile` Read/Write, which keeps upstream's 32-bit length (a read over 2 GB comes back short, never past the buffer) | — |
 | 7 | Low | `--db` tracks DB created under the default umask (0644 on macOS): other local accounts can read every received position | **Fixed** (pass 2, branch `g1/security-audit-pass-2`): `TrackStore` creates it 0600, guarded by `run.sh` |
 | 8 | Note | `TrackStore` appends one row per received CoT with no cap or retention: a chatty or hostile server grows the file for as long as the client runs | Recorded; atak-headless runs bounded by `--duration`, G6 needs retention |
 | 9 | Note | The launcher prefers `~/.m2` kernel jars over the hash-checked transplants, so `check-transplants` vouches only for the fallback | Recorded; only the same user can write `~/.m2`, so no boundary is crossed |

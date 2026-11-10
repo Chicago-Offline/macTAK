@@ -1,8 +1,8 @@
 diff --git a/core/impl/platform.cpp b/core/impl/platform.cpp
-index dac4290..39f9e77 100644
+index dac4290..3d77593 100644
 --- a/core/impl/platform.cpp
 +++ b/core/impl/platform.cpp
-@@ -354,6 +354,36 @@ void PlatformNet::closeSocket(SocketFD fd)
+@@ -354,6 +354,21 @@ void PlatformNet::closeSocket(SocketFD fd)
  #ifdef WIN32
      ::closesocket(fd);
  #else
@@ -21,25 +21,10 @@ index dac4290..39f9e77 100644
 +                ::write(2, cdiag, (size_t)cdn);
 +            }
 +        }
-+        {
-+            struct sockaddr_storage cs;
-+            socklen_t cl = sizeof(cs);
-+            int cp = -1;
-+            if (getsockname(fd, (struct sockaddr *)&cs, &cl) == 0 &&
-+                cs.ss_family == AF_INET)
-+                cp = (int)ntohs(((struct sockaddr_in *)&cs)->sin_port);
-+            char cdiag[96];
-+            int cdn = snprintf(cdiag, sizeof(cdiag),
-+                    "[commo-diag] closeSocket fd=%d lport=%d", fd, cp);
-+            if (cdn > 0 && cdn < (int)sizeof(cdiag)) {
-+                cdiag[cdn++] = (char)10;
-+                ::write(2, cdiag, (size_t)cdn);
-+            }
-+        }
      ::close(fd);
  #endif
  }
-@@ -415,6 +445,22 @@ PlatformNet::ErrorCode PlatformNet::socketRead(SocketFD fd, uint8_t *data, size_
+@@ -415,6 +430,22 @@ PlatformNet::ErrorCode PlatformNet::socketRead(SocketFD fd, uint8_t *data, size_
      ssize_t n = ::read(fd, data, *len);
      if (n <= 0) {
          *len = 0;

@@ -78,6 +78,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- commo's `closeSocket` diagnostic printed twice per close
+  (`dev/g1/patches/commo/0001-diag-socketRead-errno.patch`, found in the
+  G1 security audit's native-code read, `dev/g1/NOTES.md` §G1.14). The
+  patch carried the `[commo-diag] closeSocket` block twice at the one
+  `::close(fd)` macOS builds. The duplicate is gone. NOTES said the patch
+  probed "both `::close(fd)` sites"; the other is Android-only netlink
+  code, so it now says closeSocket.
+
 - G1 correctness audit, pass 3 (`dev/g1/NOTES.md` §G1.13, four traps):
   the kernel-mode JNI pins cleaned up with `remove(dir)` on a non-empty
   directory, which fails, leaking a `/tmp/takjni-kernel-*` dir per

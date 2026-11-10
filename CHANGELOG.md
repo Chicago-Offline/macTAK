@@ -9,6 +9,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Clean Code skills for contributors and agents (`.claude/skills/clean-code*`):
+  an entry-point skill that sets scope (code macTAK owns; never `src/` or
+  generated output; inside engine patches, only the added lines) and
+  precedence (CONTRIBUTING wins), plus nine topic skills adapted from the
+  *Clean Code* summary gist: design, understandability, naming, functions,
+  comments, source structure, objects/data, tests, smells. The skills
+  reconcile the gist with house style: comments keep the why at patch
+  sites, tests keep the `check()` canary style as one behavior per
+  check, and the boy-scout rule never widens a focused PR. Examples come
+  from this repo.
 - M3.2 shell (`dev/g2/shell/`): the Swift/AppKit host — `jni_boot.c` finds
   `libjli` and boots the JVM in-process (`JNI_CreateJavaVM`), `main.swift`
   opens an `NSWindow` over its own `CAMetalLayer` and upcalls

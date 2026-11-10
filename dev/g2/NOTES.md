@@ -1093,3 +1093,27 @@ Traps found on the way (continuing G2 numbering):
   CI and `make test-render`: the same graticule built over the Oakland
   hills, east of the camera frame, must make the smoke exit 1 with
   `FAIL: basemap attached but content covers …`.
+
+Evidence for #1 (CI, render job, ANGLE Metal on a hosted runner).
+Before: the canary alone on `be59312`, old gate (dispatch run
+42869213426). The off-frame basemap passes the smoke, so the canary
+fails:
+
+```text
+    render-smoke: basemap oakland-graticule.mbtiles type=momap provider=tileset res [9.55 .. 152.87] m/px cov lat [37.7186, 37.9962] lon [-122.3438, -121.9922]
+    render-smoke: camera (37.79520, -122.45005) @ 25.01 m/px
+    render-smoke: sentinel pixels left=0/262144 content pixels=23890 centre=(255,117,0,255)
+    render-smoke: PASS
+[basemap-gate] FAIL: expected exit 1 with 'FAIL: basemap attached but …', got exit 0
+```
+
+After: with `ContentGate`, on `d4fc664` (PR #88's render job, run
+42869993166). The same frame now fails the smoke, and the real basemap
+step still passes with `content pixels=262144`:
+
+```text
+    render-smoke: sentinel pixels left=0/262144 content pixels=23890 centre=(255,117,0,255)
+    render-smoke: FAIL: basemap attached but content covers 23890 of 262144 px (9%); need 131072 (50%)
+    render-smoke: FAIL
+[basemap-gate] PASS: an off-frame basemap fails the smoke
+```

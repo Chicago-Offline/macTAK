@@ -21,9 +21,28 @@ WORK="$(mktemp -d)"
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
 
+# Ferry Building, a point in the committed fixture: every leg derived from
+# it must read it back here (lat lon, as LayerCLI prints envelopes). Counts
+# alone passed with the axes swapped: G1.12 (residual of G2 trap #48) — a
+# projected layer came back lat/lon-flipped and every count still matched.
+FERRY_LAT=37.7955
+FERRY_LON=-122.3937
+
 rc=0
-run_one() {   # run_one FILE EXPECTED_FEATURES
-  local f="$1" n="$2" log ec=0
+# check_ferry LOG — 0 when LOG's Ferry Building envelope is within 1e-4 deg
+check_ferry() {
+  local got
+  got="$(grep -m1 ' Ferry Building ' "$1" | sed -n 's/.*\[\([^ ]*\) \([^ ]*\) \.\..*/\1 \2/p')"
+  [[ -n "$got" ]] || { echo "no Ferry Building envelope in the output"; return 1; }
+  awk -v g="$got" -v lat="$FERRY_LAT" -v lon="$FERRY_LON" 'BEGIN {
+    split(g, v, " "); d1 = v[1] - lat; d2 = v[2] - lon
+    if (d1 < 0) d1 = -d1; if (d2 < 0) d2 = -d2
+    if (d1 > 1e-4 || d2 > 1e-4) { printf "Ferry Building at lat/lon %s, expected %s %s\n", g, lat, lon; exit 1 }
+  }'
+}
+
+run_one() {   # run_one FILE EXPECTED_FEATURES [ferry]
+  local f="$1" n="$2" ferry="${3:-}" log ec=0 why
   log="$WORK/$(basename "$f").log"
   "$CLI" --layer "$f" --layer-db "$WORK/layers-$(basename "$f")" --expect-features "$n" > "$log" 2>&1 || ec=$?
   # --expect-features is a floor (>= N); this canary promises EXACTLY N, so
@@ -32,6 +51,10 @@ run_one() {   # run_one FILE EXPECTED_FEATURES
   if [[ "$ec" == 0 ]] && ! grep -q "^PASS: $n feature(s) " "$log"; then
     ec=1
     echo "[layer-test] FAIL $(basename "$f"): expected exactly $n feature(s), got: $(grep -m1 '^PASS: ' "$log" || echo 'no PASS line')"
+  fi
+  if [[ "$ec" == 0 && -n "$ferry" ]] && ! why="$(check_ferry "$log")"; then
+    ec=1
+    echo "[layer-test] FAIL $(basename "$f"): $why"
   fi
   if [[ "$ec" == 0 ]]; then
     echo "[layer-test] ok   $(basename "$f") ($n feature(s))"
@@ -47,7 +70,7 @@ run_one() {   # run_one FILE EXPECTED_FEATURES
 convert_run() {   # convert_run FMT OUTFILE EXPECTED_FEATURES SRC [extra ogr2ogr args...]
   local fmt="$1" out="$2" n="$3"; shift 3
   if ogr2ogr -f "$fmt" "$out" "$@" >/dev/null 2>&1; then
-    run_one "$out" "$n"
+    run_one "$out" "$n" ferry
   else
     echo "[layer-test] FAIL ogr2ogr -f $fmt conversion of $* — leg cannot run"; rc=1
   fi
@@ -73,13 +96,18 @@ if [[ $# -ge 1 ]]; then
     fi
   done
 else
-  run_one "$FIXTURE" "$FIXTURE_FEATURES"
+  run_one "$FIXTURE" "$FIXTURE_FEATURES" ferry
   if command -v ogr2ogr >/dev/null 2>&1; then
     # same features through three more GDAL drivers; shapefiles are single-geometry,
     # so only the points survive the conversion (the OGR driver picks one layer type).
     convert_run GPKG "$WORK/sf-landmarks.gpkg" "$FIXTURE_FEATURES" "$FIXTURE"
     convert_run KML "$WORK/sf-landmarks.kml" "$FIXTURE_FEATURES" "$FIXTURE"
     convert_run 'ESRI Shapefile' "$WORK/sf-points.shp" 3 "$FIXTURE" -where "kind = 'poi'"
+    # Projected CRSes: the engine transforms these to EPSG:4326 itself, the
+    # path that flipped lat/lon on GDAL 3 (G1.12). UTM 10N and Web Mercator.
+    convert_run 'ESRI Shapefile' "$WORK/sf-points-utm10n.shp" 3 "$FIXTURE" \
+      -where "kind = 'poi'" -t_srs EPSG:32610
+    convert_run GPKG "$WORK/sf-landmarks-3857.gpkg" "$FIXTURE_FEATURES" "$FIXTURE" -t_srs EPSG:3857
   else
     echo "[layer-test] ogr2ogr not on PATH; GPKG/KML/SHP legs skipped"
   fi

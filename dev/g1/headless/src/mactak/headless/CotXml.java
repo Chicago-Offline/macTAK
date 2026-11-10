@@ -85,6 +85,33 @@ final class CotXml {
     }
 
     /**
+     * value made safe to print on a terminal: every C0 control, DEL and C1
+     * control (U+0080–U+009F, which includes the 8-bit CSI U+009B some
+     * terminals honour) becomes a visible {@code \\xNN}. Everything else,
+     * non-ASCII text included, passes through. For inbound data (G1.14,
+     * security audit #3): a hostile server's ESC sequences could otherwise
+     * rewrite earlier output, retitle the window, or worse.
+     */
+    static String printable(String value) {
+        if (value == null)
+            return null;
+        StringBuilder sb = null;
+        for (int i = 0; i < value.length(); i++) {
+            final char c = value.charAt(i);
+            final boolean control = c < 0x20 || (c >= 0x7F && c <= 0x9F);
+            if (control && sb == null)
+                sb = new StringBuilder(value.length() + 8).append(value, 0, i);
+            if (sb == null)
+                continue;
+            if (control)
+                sb.append(String.format(Locale.US, "\\x%02x", (int) c));
+            else
+                sb.append(c);
+        }
+        return sb == null ? value : sb.toString();
+    }
+
+    /**
      * Self-SA as ATAK sends it (a-f-G-U-C + contact/__group/takv/uid): this is
      * what registers the EUD on a TAK server — OpenTAKServer only starts the
      * per-client fan-out consumer once a parseable self-SA with uid, callsign

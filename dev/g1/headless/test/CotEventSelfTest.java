@@ -44,6 +44,7 @@ public final class CotEventSelfTest {
         parseSide();
         escapeAndCoordinates();
         builders();
+        printableOutput();
         if (failures == 0) {
             System.out.println("cot-selftest: ALL PASS");
             return;
@@ -186,6 +187,30 @@ public final class CotEventSelfTest {
         check(tiny != null && tiny.indexOf('E') < 0
                         && Double.parseDouble(tiny) == 1e-5,
                 "tiny values stay plain decimal, never 1.0E-5: " + tiny);
+    }
+
+    private static void printableOutput() throws Exception {
+        // G1.14 #3: server-supplied text reaches the terminal only escaped.
+        check("\\x1b[2J\\x1b]0;pwned\\x07".equals(CotXml.printable("\u001b[2J\u001b]0;pwned\u0007")),
+                "printable escapes ESC/BEL (terminal escape injection)");
+        check("a\\x7fb\\x9bc".equals(CotXml.printable("a\u007fb\u009bc")),
+                "printable escapes DEL and C1 (8-bit CSI U+009B)");
+        check("plain ASCII 123 <event/>".equals(CotXml.printable("plain ASCII 123 <event/>")),
+                "printable leaves plain text untouched");
+        check("caf\u00e9 \uD83D\uDE00 \u00a0".equals(CotXml.printable("caf\u00e9 \uD83D\uDE00 \u00a0")),
+                "printable keeps non-control Unicode (accents, emoji, NBSP)");
+        check(CotXml.printable(null) == null, "printable(null) is null");
+
+        // A parsed callsign can carry a real newline (&#10;) or a C1 control
+        // (legal in XML 1.0); toString must keep the track to one line.
+        CotEvent e = CotEvent.parse("<event uid='u&#10;FAKE' type='t'>"
+                + "<point lat='1' lon='2'/><detail><contact callsign='EVIL&#10;headless: track uid=forged&#x9b;31m'/>"
+                + "</detail></event>");
+        String line = e.toString();
+        check(line.indexOf('\n') < 0 && line.indexOf('\u009b') < 0
+                        && line.contains("callsign=EVIL\\x0aheadless: track uid=forged\\x9b31m")
+                        && line.contains("uid=u\\x0aFAKE"),
+                "CotEvent.toString escapes controls per field (no forged line): " + line);
     }
 
     private static void builders() throws Exception {

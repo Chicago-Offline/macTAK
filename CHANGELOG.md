@@ -68,6 +68,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- GDAL 3 axis order on the C++ OGR path (`dev/g1/NOTES.md` §G1.12, the C++
+  residual of G2 trap #48): an offline layer in a projected CRS (UTM
+  shapefile, Web-Mercator GeoPackage) opened with lat/lon swapped. The
+  engine's native transforms target a plain `importFromEPSG(4326)`, which
+  GDAL 3 orders lat,lon. `dev/g1/patches/gdal3-axis-order-cpp-default.patch`
+  sets `OSR_DEFAULT_AXIS_MAPPING_STRATEGY=TRADITIONAL_GIS_ORDER` first thing
+  in `GdalLibrary::initImpl`. `test/layer.sh` gains UTM 10N and EPSG:3857
+  legs and checks a known point's coordinates on every leg; before, it only
+  counted features.
 - G1 correctness audit (`dev/g1/NOTES.md` §G1.10): `getDirContents` and
   the filtered `IO_listFiles` no longer return empty listings. They passed
   an unbound `STLVectorAdapter` to `listFiles`, the core-engine twin of the

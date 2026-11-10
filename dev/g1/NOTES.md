@@ -889,3 +889,54 @@ engine code its patches touch. Fixed on the branch:
 
 `DataPackageSelfTest` gains seven assertions for the above. Run against
 the pre-audit `DataPackage`/`ConnectOptions`, they fail (A/B checked).
+
+## G1.12 — GDAL 3 axis order on the C++ OGR path (2026-11-10, residual of G2 trap #48)
+
+Found in audit pass 3. G2.4b b.2 pinned `OAMS_TRADITIONAL_GIS_ORDER` on
+the Java SRSes (`GdalLibrary.EPSG_4326`, `GdalDatasetProjection2`); the
+engine's C++ builds its own. `OGR_Content2::getLayerTransform`, the
+offline-layer path behind `atak-headless --layer` and G2's
+`--layer` render, transforms any layer whose SRS isn't EPSG:4326 to a
+plain `importFromEPSG(4326)`. On GDAL ≥ 3 that target is lat,lon by
+authority order, and the engine reads x as longitude. The same shape is in
+`OGRFeatureDataStore`, `OSRProjectionSpi`, `GdalDatasetProjection`,
+`jgdallibrary.cpp` and `josrutils.cpp`.
+
+```sh
+bash dev/g1/headless/test/layer.sh   # CI: native-engine + render-angle
+```
+
+### The patch
+
+`dev/g1/patches/gdal3-axis-order-cpp-default.patch` sets
+`OSR_DEFAULT_AXIS_MAPPING_STRATEGY=TRADITIONAL_GIS_ORDER` as the first
+statement of the engine's native `GdalLibrary::initImpl`, before
+`GDALAllRegister`. GDAL ≥ 3.5 reads it whenever an `OGRSpatialReference`
+is constructed, so every C++ SRS from then on is lon,lat, exactly what
+GDAL 2.4 gave the engine. One line covers all the sites above, plus any
+not yet reached. Per-site `SetAxisMappingStrategy` calls would have to
+find every SRS the engine builds. CI's Homebrew GDAL is 3.13.3.
+
+Every OGR layer path reaches `initImpl` first: `LayerStore`'s
+constructor calls `NativeGdal.init` before it registers the provider, and
+G2's `RenderSmoke`/`WindowApp` open layers through `LayerStore`.
+
+Traps found on the way (do not rediscover these):
+
+- **The engine's C++ OGR transforms swapped lat/lon on GDAL 3** for any
+  layer in a projected CRS. Witness, a GDAL 3.8 program mirroring
+  `getLayerTransform` on files `layer.sh` now builds:
+  `u.shp layer auth=32610 engine-transform x=37.7955 y=-122.3937`. That's
+  Ferry Building's latitude in the longitude slot. EPSG:4326 layers skip
+  the transform, which is why every committed fixture passed. **Guard:**
+  the patch above; `layer.sh` opens a UTM 10N shapefile and an EPSG:3857
+  GeoPackage built from the fixture and checks Ferry Building's position.
+- **A feature-count canary can't see swapped axes.** `layer.sh` passed
+  with every coordinate flipped, because the counts still matched.
+  **Guard:** every fixture-derived leg now checks Ferry Building's
+  envelope (37.7955, −122.3937, within 1e-4°) as `LayerCLI` prints it.
+
+Evidence (CI, `ci.yml` on this branch): pending. A dispatch run on the
+guard-only commit (`fb844ba`, run 42724928764) must fail the two projected
+legs, and the PR run with the patch must pass them. Both runs' log lines
+are quoted here before merge.

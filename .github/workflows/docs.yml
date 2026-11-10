@@ -44,6 +44,8 @@ jobs:
       - name: Check out macTAK
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Keeps the token (no persist-credentials: false, unlike every
+          # other checkout): the diff step below runs git fetch.
           fetch-depth: 0
 
       - name: Diff against the PR base
@@ -79,6 +81,8 @@ jobs:
     steps:
       - name: Check out macTAK
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: markdownlint-cli2
         if: needs.changes.outputs.changed == 'true'
@@ -95,6 +99,8 @@ jobs:
     steps:
       - name: Check out macTAK
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Check links with lychee
         if: needs.changes.outputs.changed == 'true'

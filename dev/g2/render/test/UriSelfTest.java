@@ -72,6 +72,17 @@ public final class UriSelfTest {
         checkEquals("3", http.getQueryParameter("z"), "query parameter");
         checkEquals("x y", http.getQueryParameter("name"), "query parameter, %20 decoded");
         checkEquals("frag", http.getFragment(), "fragment");
+
+        // --- getQueryParameter: '+' is a space in a query value, as on Android ---
+        final Uri q = Uri.parse("https://tiles.example.com/wms?layers=My+Layer&crs=EPSG%3A4326&plus=a%2Bb&empty=&flag");
+        checkEquals("My Layer", q.getQueryParameter("layers"), "query value: '+' decodes to a space");
+        checkEquals("a+b", q.getQueryParameter("plus"), "query value: %2B stays a literal '+'");
+        checkEquals("EPSG:4326", q.getQueryParameter("crs"), "query value: %3A decoded");
+        checkEquals("", q.getQueryParameter("empty"), "query value: empty");
+        checkEquals("", q.getQueryParameter("flag"), "query flag without '=' is the empty string");
+        checkEquals(null, q.getQueryParameter("absent"), "absent query parameter is null");
+        checkEquals("layers=My+Layer&crs=EPSG:4326&plus=a+b&empty=&flag", q.getQuery(),
+                "getQuery keeps '+' (only parameter values convert it)");
         checkEquals("b.png", http.getLastPathSegment(), "last path segment");
 
         if (failures > 0) {

@@ -274,6 +274,13 @@ jobs:
           bash dev/g2/render/run.sh --basemap dev/g2/build/fixtures/sf-graticule.mbtiles \
             --layer dev/g1/headless/test/fixtures/sf-landmarks.geojson --out dev/g2/build/render-basemap.png
 
+      - name: Basemap gate negative canary (an off-frame basemap must fail the smoke)
+        # The step above passes on content pixels; this proves that gate can
+        # fail when the basemap contributes nothing and only the vector
+        # layer draws (dev/g2/render/test/basemap-gate.sh).
+        if: needs.changes.outputs.changed == 'true'
+        run: bash dev/g2/render/test/basemap-gate.sh
+
       - name: Dynamic-size render smoke (--resize mid-run, M3.1)
         # pbuffer rebuild via NativeEgl.resize; PASS requires the surface's
         # OnSizeChangedListeners to fire and content pixels at the new size

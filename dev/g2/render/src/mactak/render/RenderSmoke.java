@@ -316,8 +316,9 @@ public final class RenderSmoke {
                 if (glErrors <= 10) System.err.printf("render-smoke: frame %d GL error 0x%04x%n", i, err);
             }
             if (hasContent) {
-                if (rendered % 4 == 0)      // poll: has the async layer landed?
-                    contentSeen = NativeEgl.readPixels(px) && countNonClear(px, w, h) > 0;
+                if (rendered % 4 == 0)      // poll: has the async content landed?
+                    contentSeen = NativeEgl.readPixels(px) && countNonClear(px, w, h)
+                            >= ContentGate.requiredPixels(w, h, !layers.isEmpty(), !basemaps.isEmpty());
                 try { Thread.sleep(16); } catch (InterruptedException e) { break; }
             }
             if (windowMode) {
@@ -368,9 +369,11 @@ public final class RenderSmoke {
             System.err.println("render-smoke: FAIL: no frame was ever presented");
         if (windowMode && swapFails > 0)
             System.err.println("render-smoke: FAIL: " + swapFails + " of " + (presented + swapFails) + " presents failed");
+        final long required = ContentGate.requiredPixels(w, h, !layers.isEmpty(), !basemaps.isEmpty());
         boolean pass = readOk && glErrors == 0 && sentinel == 0 && resizeSeen
-                && (!hasContent || content > 0) && windowOk;
-        if (hasContent && content == 0) System.err.println("render-smoke: FAIL: layer attached but frame has no content pixels");
+                && content >= required && windowOk;
+        if (content < required)
+            System.err.println("render-smoke: FAIL: " + ContentGate.failure(content, required, w, h, !basemaps.isEmpty()));
         System.out.println(pass ? "render-smoke: PASS" : "render-smoke: FAIL");
         System.exit(pass ? 0 : 1);
     }

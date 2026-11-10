@@ -309,8 +309,9 @@ public final class WindowApp {
                     if (glErrors <= 10) System.err.printf(TAG + ": frame %d GL error 0x%04x%n", i, err);
                 }
                 if (hasContent) {
-                    if (rendered % 4 == 0)      // poll: has the async layer landed?
-                        contentSeen = NativeEgl.readPixels(px) && countNonClear(px, w, h) > 0;
+                    if (rendered % 4 == 0)      // poll: has the async content landed?
+                        contentSeen = NativeEgl.readPixels(px) && countNonClear(px, w, h)
+                                >= ContentGate.requiredPixels(w, h, layers.length > 0, basemaps.length > 0);
                     try { Thread.sleep(16); } catch (InterruptedException e) { break; }
                 }
                 // Present last: once a frame is presented its back buffer's
@@ -349,11 +350,13 @@ public final class WindowApp {
                 }
             }
 
+            final long required = ContentGate.requiredPixels(w, h, layers.length > 0, basemaps.length > 0);
             boolean pass = readOk && glErrors == 0 && sentinel == 0 && presented > 0 && swapFails == 0
-                    && (!hasContent || content > 0);
+                    && content >= required;
             if (presented == 0) System.err.println(TAG + ": FAIL: no frame was ever presented");
             if (swapFails > 0) System.err.println(TAG + ": FAIL: " + swapFails + " of " + (presented + swapFails) + " presents failed");
-            if (hasContent && content == 0) System.err.println(TAG + ": FAIL: layer attached but frame has no content pixels");
+            if (content < required)
+                System.err.println(TAG + ": FAIL: " + ContentGate.failure(content, required, w, h, basemaps.length > 0));
             System.out.println(pass ? TAG + ": PASS" : TAG + ": FAIL");
 
             if (!pass) {

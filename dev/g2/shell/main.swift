@@ -354,6 +354,16 @@ final class Shell: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true                              // user-close flows into the path above
     }
+
+    /// The last point at which WindowApp's exit code can become ours. Once
+    /// applicationShouldTerminate says .terminateNow, -[NSApplication
+    /// terminate:] posts this and then calls exit(0) itself: app.run() never
+    /// returns, so code after it never ran and a failed render exited 0.
+    func applicationWillTerminate(_ notification: Notification) {
+        let code = Int32(jniCallInt(midExit))
+        print("\(SHELL): exiting with WindowApp's code \(code)")
+        exit(code)
+    }
 }
 
 let app = NSApplication.shared
@@ -414,11 +424,11 @@ timer.tolerance = 0.02
 RunLoop.main.add(timer, forMode: .common)
 app.run()
 
-// applicationShouldTerminate replied to AppKit only once the render thread
-// reported EXITED — the engine and EGL are down on their own thread. Take
-// WindowApp's code as ours and leave; the JVM is never destroyed.
-let finalCode = Int32(jniCallInt(midExit))
-print("\(SHELL): exiting with WindowApp's code \(finalCode)")
-exit(finalCode)
+// Not reached on the terminate path: AppKit exits the process from inside
+// terminate:, and applicationWillTerminate has already left with WindowApp's
+// code (the engine and EGL are down on their own thread by then; the JVM is
+// never destroyed). run() returns only after NSApp.stop, which nothing
+// calls; if that ever changes, the code still comes from WindowApp.
+exit(Int32(jniCallInt(midExit)))
 
 // __JNI_AND_WINDOW__

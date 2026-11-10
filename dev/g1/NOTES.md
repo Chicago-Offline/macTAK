@@ -1154,9 +1154,12 @@ and its password. Six findings; each lands as its own focused PR.
 | 1 | High | commo accepts any server cert that chains to the truststore CA: no TLS-server purpose check, and no hostname check (deliberate upstream, per ATAK) | **Fixed** (branch `g1/commo-tls-server-purpose`): `patches/commo/0002-sslcertchecker-require-server-purpose.patch`, guarded by `test/tls-purpose.sh` |
 | 2 | Medium | Transplant jars not fully integrity-checked: slf4j jars unlisted, CI never verified hashes | **Fixed here** |
 | 3 | Low | Inbound CoT printed raw to the terminal: escape-sequence injection, and forged `headless:` lines | **Fixed** (branch `g1/sanitize-inbound-log`): `CotXml.printable`, guarded by `CotEventSelfTest` |
-| 4 | Low (dormant) | commo's curl paths (file transfer, mission packages, URL requests) set `VERIFYPEER`/`VERIFYHOST` to 0 | Recorded below; unused by atak-headless today |
+| 4 | Low (dormant) | commo's curl paths (file transfer, mission packages, URL requests) skip the hostname check always, and the chain check when the caller passes no CA or the transfer is peer-hosted | Recorded below (narrowed in pass 2: a caller rule, not a patch); unused by atak-headless today |
 | 5 | Note | `NativeSsl` loads OpenSSL's legacy provider process-wide, not only for the RC2-40 PKCS#12 read | Recorded |
 | 6 | Note | Reviewed, no issue: data-package importer (Zip-Slip, size caps, XXE, no password in logs, 0700 cert dir), `CotEvent` (XXE + §G1.11 validation), `TrackStore` (bound parameters), fake server (loopback only) | — |
+| 7 | Low | `--db` tracks DB created under the default umask (0644 on macOS): other local accounts can read every received position | **Fixed** (pass 2, branch `g1/security-audit-pass-2`): `TrackStore` creates it 0600, guarded by `run.sh` |
+| 8 | Note | `TrackStore` appends one row per received CoT with no cap or retention: a chatty or hostile server grows the file for as long as the client runs | Recorded; atak-headless runs bounded by `--duration`, G6 needs retention |
+| 9 | Note | The launcher prefers `~/.m2` kernel jars over the hash-checked transplants, so `check-transplants` vouches only for the fallback | Recorded; only the same user can write `~/.m2`, so no boundary is crossed |
 
 Trust model: a data package chooses the server you connect to, so a
 `.dp` is trusted configuration, not hostile input. Its parser is still
@@ -1230,12 +1233,30 @@ Traps found on the way (do not rediscover these):
   holding the literal text `\x0a` forge a line all over again.
   `CotEventSelfTest` pins six cases, among them that exact callsign:
   `callsign=EVIL\x0aheadless: track uid=forged\x9b31m`, one line.
-- **commo's HTTP paths turn TLS verification off** (dormant): ATAK-CIV's
-  `simplefileiomanager.cpp`, `missionpackagemanager.cpp` and
-  `urlrequestmanager.cpp` set `CURLOPT_SSL_VERIFYPEER`/`VERIFYHOST` to
-  0. atak-headless calls none of them today. **Guard:** none yet.
-  Whoever wires data-package or mission sync (G6 rung 5) must patch
-  these first; this entry is the reminder.
+- **commo's HTTP paths can turn TLS verification off** (dormant):
+  ATAK-CIV's `simplefileiomanager.cpp`, `missionpackagemanager.cpp` and
+  `urlrequestmanager.cpp` set `CURLOPT_SSL_VERIFYHOST` to 0 on every
+  https request (the streaming path skips the hostname check too, by
+  design). `CURLOPT_SSL_VERIFYPEER` goes to 0 only when the caller
+  passes no CA certs (`if (!ioCtx->caCerts)`, "accepts any cert from
+  server") and for peer-hosted mission-package downloads. Given CA
+  certs, `sslCtxSetup` installs them as the `SSL_CTX` store and curl
+  verifies through libssl, which already applies the TLS-server
+  purpose, so finding #1's patch is not needed there. Pass 2 corrected
+  the first reading ("patch these first"): the fix is a caller rule,
+  not a commo patch, and patching `VERIFYPEER` on would break
+  peer-hosted transfers. atak-headless calls none of them today.
+  **Guard:** none yet. Whoever wires data-package or mission sync (G6
+  rung 5) must always pass the truststore's CA certs to these calls;
+  this entry is the reminder.
+- **The tracks DB was readable by every local account** (pass 2, #7).
+  `--db` handed the path to the engine's sqlite open, which created the
+  file under the default umask: 0644 on macOS. The file holds every
+  position received from other users. **Guard:** `TrackStore` creates a
+  new file 0600 before the open (sqlite reads an empty file as a new
+  database and gives its `-journal`/`-wal` files the database's mode); an
+  existing file keeps its mode. `run.sh` fails unless both clients' DBs
+  are 600. A `null` path is the engine's `:memory:` database, so no file.
 
 Evidence for #1 (CI, `cot-roundtrip.yml` dispatch runs). Before: the
 test alone on `8b38d91`, unpatched commo (run 42741415679):
@@ -1257,6 +1278,22 @@ After: with the patch, on `237d36d` (run 42743222107):
 [tls-test] ok   impostor: refuse
     headless: iface-error CONN_SSL_PEER_CERT_NOT_TRUSTED
 [tls-test] PASS: server certs accepted, client-only impostor refused
+[g1-roundtrip] PASS — both ifaces up, B's presence+marker relayed to A, A's presence relayed to B, both persisted in the tracks DBs
+```
+
+Evidence for #7 (CI, `cot-roundtrip.yml`). Before: the `run.sh` guard
+alone on `239d51c` (dispatch run 42758526452):
+
+```text
+[g1-roundtrip] sqlite3 …/roundtrip-a.sqlite: 16 fix(es), 1 for B's marker
+[g1-roundtrip] FAIL: roundtrip-a.sqlite has mode 644, want 600 (owner-only)
+[g1-roundtrip] FAIL: roundtrip-b.sqlite has mode 644, want 600 (owner-only)
+```
+
+After: with the `TrackStore` fix, on `c6238ca` (run 42758809720):
+
+```text
+[g1-roundtrip] sqlite3 …/roundtrip-a.sqlite: 15 fix(es), 1 for B's marker
 [g1-roundtrip] PASS — both ifaces up, B's presence+marker relayed to A, A's presence relayed to B, both persisted in the tracks DBs
 ```
 

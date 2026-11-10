@@ -291,6 +291,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- atak-headless creates its `--db` tracks database owner-only (0600)
+  (`dev/g1/NOTES.md` §G1.14, G1 security audit #7). The file holds every
+  position received from other users, and the engine's sqlite open created
+  it under the default umask, readable by every local account.
+  `TrackStore` now creates a new file 0600 first; sqlite gives its journal
+  files the same mode. `dev/g1/headless/run.sh` fails on any other mode.
+  Pass 2 also narrows finding #4: commo's curl paths skip the chain check
+  only when the caller passes no CA (or the transfer is peer-hosted), so
+  G6 must always pass the truststore rather than patch commo.
+
 - atak-headless escapes control characters in server-supplied output
   (`dev/g1/NOTES.md` §G1.14, G1 security audit #3). `headless:
   cot-received` printed a hostile server's ESC/BEL/C1 bytes straight to

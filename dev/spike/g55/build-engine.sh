@@ -107,7 +107,7 @@ cp "$(dirname "$tiny_gltf_h")"/*.h "$WORK/overlay/tinygltf/"
 # it ships one, else nlohmann-json (G0's stand-in)
 json_hpp="$(find "$WORK/tinygltf-src" -name json.hpp -print -quit)"
 cp "${json_hpp:-$(brew --prefix nlohmann-json)/include/nlohmann/json.hpp}" "$WORK/overlay/tinygltf/json.hpp"
-cp "$TINYGLTFLOADER"/*.h "$WORK/overlay/tinygltfloader/"
+cp "$TINYGLTFLOADER"/*.h "$TINYGLTFLOADER"/json.hpp "$WORK/overlay/tinygltfloader/"
 
 log "generating wrapper CMakeLists"
 cat > "$WORK/CMakeLists.txt" <<CMAKE

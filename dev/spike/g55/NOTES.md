@@ -150,7 +150,9 @@ because it waits for the launcher's move off Java 8.
 Study step 2. **5.5 commo builds on macOS, speaks QUIC, and passes the G1
 TLS and round-trip gates**, with its QUIC on ngtcp2's `ossl` backend
 over the same Homebrew `openssl@3` (3.5.9) as the rest of commo.
-`commo.sh` runs six steps, all green:
+`commo.sh` runs six steps, all green, locally and on `macos-26` in CI
+(run [43062762143](https://github.com/Chicago-Offline/macTAK/actions/runs/43062762143),
+job "5.5 commo + QUIC"):
 
 ```text
 [g55-commo] ok: one OpenSSL runtime (openssl@3), ngtcp2 + crypto_ossl inside libcommoncommo

@@ -46,6 +46,8 @@ Gate-gated plan. Each gate has: **objective → exit criteria (demo artifact) �
 
 Tracks/contacts list, map overlays (CoT markers, routes), chat (GeoChat), layer manager, coordinate tools; certificate/trust store UI (port `AtakCertificateDatabase` concept to Keychain). **Exit:** two Mac clients on one FTS server see each other's markers and chat live.
 
+**Open before G3 (2026-11-11):** which upstream version the app layer targets ([rebase-study-5.5.md](rebase-study-5.5.md)), and whether ATAK's app code is reused on the JVM behind more Android stand-ins or rewritten in Swift ([atak-feature-coverage.md](atak-feature-coverage.md) §The open decision).
+
 ## G4 — Data & import parity rung 1 (2–4 mo)
 
 KML/KMZ, GPX, shapefile, GeoJSON import/export (GDAL-backed via the engine's `formats`/`db` layers); offline elevation (DTED/DEM via gdal/las stack); MRU/route tools. **Exit:** a workflow a WinTAK user performs daily works identically.
@@ -68,7 +70,7 @@ Rungs, each independently demoable (highest-value first):
 6. Plugin story — **explicitly out of scope**: ATAK's Android plugin SDK (`pluginsdk.zip`) produces APK-bound artifacts that cannot run natively; provide a macOS-native extension API instead (documented divergence)
 7. Full tool-by-tool port of the long tail (`maps`, `widgets`, `importfiles/sort`, `routes`, `layers` packages — the 492K-LOC app tax)
 
-Each rung re-estimates against upstream (`889eee2` is the frozen baseline; repo static since Oct 2024 — divergence risk currently low, rising if upstream resumes).
+Each rung re-estimates against upstream. `889eee2` (v4.6.0.5) is the current baseline, but upstream has resumed: the public source now lives at `TAK-Product-Center/atak-civ` (5.5.1.10, December 2025), and store builds are 5.6 or later. **2026-11-11:** [rebase-study-5.5.md](rebase-study-5.5.md) measures the move to 5.5 and recommends rebasing in stages before G3.
 
 Reference evidence exists (2026-11-02): a full-display capture of the WinTAK golden session plus a repeatable in-guest capture harness (`pathway-a.md` §FTS round-trip; harness in `../dev/reference/tools/`) — G6 parity checklists compare against it. Captures stay local per `ci-qa.md` §3: GOTS-derived artifacts never enter the public repo.
 
@@ -83,6 +85,7 @@ Reference evidence exists (2026-11-02): a full-display capture of the WinTAK gol
 | R4 AppKit/JVM threading conflicts | G2 | Split-process design (headless engine + native UI over IPC). Decision experiment is G2 M3 — host committed 2026-11-05 (Swift shell + `libjli`, in-process); verdict lands in `../dev/g2/NOTES.md` and this cell |
 | R6 GPL obligations | G5 | Publish at first external release; legal review at G0 kickoff |
 | R7 scripted UX-parity capture is fragile (WinTAK UI wedge; ~4 px text at guest scale 5120×2600→1280×650) | G6 | Protocol-level CoT witnesses + config-driven setup (`Config.xml`); capture from clones, restart between scripted passes (`pathway-a.md` gotchas #4–5) |
+| R8 upstream moved on: public 5.5 source with new native dependencies (cesium-native, ngtcp2/quictls) | before G3 | Rebase in stages: engine without 3D Tiles first, then commo, then cesium-native when 3D Tiles is needed ([rebase-study-5.5.md](rebase-study-5.5.md)) |
 
 ## Where the work lives now
 

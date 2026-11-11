@@ -21,6 +21,8 @@ assumes them:
 | [docs/pathway-c.md](docs/pathway-c.md) | Host strategy (JVM vs native Swift), renderer mapping, risk register |
 | [docs/roadmap.md](docs/roadmap.md) | The gate-gated plan with exit criteria and fallback decision points |
 | [docs/ci-qa.md](docs/ci-qa.md) | CI tiers, runner strategy, as-landed state |
+| [docs/atak-feature-coverage.md](docs/atak-feature-coverage.md) | ATAK's feature set mapped to what macTAK supports today |
+| [docs/rebase-study-5.5.md](docs/rebase-study-5.5.md) | Measured cost of moving the upstream baseline from 4.6 to 5.5 |
 | [dev/g1/NOTES.md](dev/g1/NOTES.md) · [dev/g2/NOTES.md](dev/g2/NOTES.md) | Engineering notes: how each milestone actually went — traps, gate logs, guards |
 
 ## Setup

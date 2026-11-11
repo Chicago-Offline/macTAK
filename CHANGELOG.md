@@ -9,6 +9,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `docs/atak-feature-coverage.md`: ATAK-CIV's feature set at the 4.6 pin
+  mapped to what macTAK supports today (working, in the engine but unwired,
+  to build, or platform-bound), with the app-layer numbers behind the open
+  reuse-or-rewrite decision (1,781 files, 70% importing Android APIs, 33%
+  Android UI).
+- `docs/rebase-study-5.5.md`: the measured cost of moving the upstream
+  baseline from `889eee2` (4.6.0.5) to the public
+  `TAK-Product-Center/atak-civ` 5.5.1.10. Engine 0.59.1 → 8.30.5; new
+  native dependencies cesium-native and draco (not wired for macOS
+  upstream) and ngtcp2/quictls in commo; of the 37 engine patches, 17
+  apply cleanly, 9 with fuzz and 11 fail (2 because upstream fixed the
+  same bug); the commo TLS server-purpose patch (G1 security #1) still
+  applies and is still needed. Recommends rebasing in stages before G3.
+  The roadmap (G3, G6, risk R8), the pathway-c risk register (R7) and the
+  CONTRIBUTING reading order point to both docs.
+
 - Clean Code skills for contributors and agents (`.claude/skills/clean-code*`):
   an entry-point skill that sets scope (code macTAK owns; never `src/` or
   generated output; inside engine patches, only the added lines) and

@@ -31,8 +31,8 @@ die() { printf '[g55-ngtcp2] FATAL: %s\n' "$*" >&2; exit 2; }
 for t in curl pkg-config make shasum; do
   command -v "$t" >/dev/null 2>&1 || die "missing tool: $t"
 done
-OPENSSL="$(brew --prefix openssl@3 2>/dev/null)" && [[ -d "$OPENSSL/lib" ]] \
-  || die "brew openssl@3 missing — brew install openssl@3"
+OPENSSL="$(brew --prefix openssl@3 2>/dev/null || true)"
+[[ -n "$OPENSSL" && -d "$OPENSSL/lib" ]] || die "brew openssl@3 missing — brew install openssl@3"
 openssl_version="$(PKG_CONFIG_PATH="$OPENSSL/lib/pkgconfig" pkg-config --modversion openssl)"
 [[ "$(printf '%s\n%s\n' "$MIN_OPENSSL" "$openssl_version" | sort -V | head -1)" == "$MIN_OPENSSL" ]] \
   || die "openssl@3 is $openssl_version; the ossl backend needs ≥ $MIN_OPENSSL (SSL_set_quic_tls_cbs)"

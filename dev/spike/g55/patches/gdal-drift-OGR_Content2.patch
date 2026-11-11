@@ -1,0 +1,20 @@
+--- a/tmp/takeng-src/cpp/formats/ogr/OGR_Content2.cpp
++++ b/tmp/takeng-src/cpp/formats/ogr/OGR_Content2.cpp
+@@ -107,7 +107,7 @@ namespace {
+ 
+             // Check that the spatial reference ID is WGS84 (4326).  If not, but the
+             // layer has a projection, return a coordinate transformation to WGS84.
+-            OGRSpatialReference* spatialRef (layer.GetSpatialRef ());
++            OGRSpatialReference* spatialRef (const_cast<OGRSpatialReference *>(layer.GetSpatialRef ()));
+             if (spatialRef && getSpatialRefID (*spatialRef) != 4326) {
+                 result = OGRCreateCoordinateTransformation (spatialRef, getEPSG_4326 ());
+             }
+@@ -695,7 +695,7 @@ TAKErr OGR_Content2::createLegacyResult(std::unique_ptr<feature::FeatureDataSour
+     int altitudeMode = 0;
+     bool tessellate = true;
+     for (int i = 0; i < currentFeature->GetFieldCount(); ++i) {
+-        OGRFieldDefn* ogrfdn = currentFeature->GetFieldDefnRef(i);
++        OGRFieldDefn* ogrfdn = const_cast<OGRFieldDefn *>(currentFeature->GetFieldDefnRef(i));
+         const char* name = ogrfdn->GetNameRef();
+         const OGRFieldType ogrFieldtype = ogrfdn->GetType();
+         if (!TAK::Engine::Port::String_strcasecmp(name, "gx:altitudeMode"))

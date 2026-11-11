@@ -186,9 +186,13 @@ JNI_CXXFLAGS="-g -O2 -fPIC -std=c++17 -Wall -Wno-unused \
  -I$WORK/shim/PGSC_Utils/include \
  -I$JDK/include -I$JDK/include/darwin -I$WORK/shim/include/libxml2 \
  -Wno-deprecated-declarations"
+# javaversion= : 5.5's Makefile asks ant for it and, where ant is
+# installed (GitHub's macOS image), expects javac -h headers instead of
+# javah's; the empty override keeps the javah path everywhere (4.6's
+# Makefile has no such variable)
 make -C "$WORK/commo/jni/native" -j"$JOBS" all TARGET=macos \
   JAVA_HOME="$JDK" TAKTHIRDPARTYDIR="$WORK/shim" CURL_CONF="$CURL_CONF" \
-  CXXFLAGS="$JNI_CXXFLAGS" LINK_FLAGS="-shared"
+  CXXFLAGS="$JNI_CXXFLAGS" LINK_FLAGS="-shared" javaversion=
 
 # --- Java jar --------------------------------------------------------------
 log "packing jcommoncommo.jar"

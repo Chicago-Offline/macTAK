@@ -90,6 +90,16 @@ That leaves nine failing patches as real rework, mostly the JNI guard
 series and `vsi-jfile-gdal3-api` (5.5's `vsi_jfile.cpp` still targets
 GDAL 2's VSI interface).
 
+**Corrected by spike 1 (2026-11-11).** The fuzzy and reverse dry-runs
+above ran at `--fuzz=3`, which lets a hunk match with no context at all,
+so two of these numbers are wrong. `glbatchshaders-dead-store` is not
+upstream: the dead store is still in 5.5 (`GLBatchGeometryShaders.cpp`
+line 447), and the reverse match was spurious. Three patches are
+upstream (`cpp17-legacy-headers`, `megatexture-sharetile-comma-operator`,
+`terraintile-ecef-ge`), and fuzz placed several hunks in the wrong place.
+The measured port is in
+[dev/spike/g55/NOTES.md](../dev/spike/g55/NOTES.md).
+
 commo:
 
 - `0002-sslcertchecker-require-server-purpose` (G1 security audit #1)
@@ -123,6 +133,9 @@ never emits it. TAK servers accept CoT without it today; adding
    cesium-native and draco sources out, as G0 left out the drivers it
    could not build; refresh the nine fuzzy patches and redo the nine
    failing ones. This is the G0-style answer to whether 5.5 builds here.
+   **Done 2026-11-11: it builds** (471 of 471 steps, `libtakengine`
+   links); the record, the remaining steps and a time estimate are in
+   [dev/spike/g55/NOTES.md](../dev/spike/g55/NOTES.md).
 2. **Spike 5.5 commo.** Decide the QUIC crypto backend: Homebrew's ngtcp2,
    a quictls build, or a patch onto OpenSSL 3.5's own QUIC support. Then
    rerun `make test-roundtrip` and `make test-tls`.

@@ -6,7 +6,9 @@ usage: summarize-build.py BUILD_LOG ENGINE_DIR
                    from paths so the summary reads cpp/..., jni/...
 prints: counts, one line per failed target with its first error, then the
         error messages grouped by kind (paths and names stripped) so one
-        root cause that breaks many sources shows up once
+        root cause that breaks many sources shows up once, then every
+        undefined symbol a failed link reported, with the first object
+        that references it
 """
 import collections
 import re
@@ -16,6 +18,8 @@ FAILED = re.compile(r"^FAILED: (?:\[code=\d+\] )?(\S+)")
 ERROR = re.compile(r"^(.*?):(\d+):\d+: (?:fatal )?error: (.*)$")
 LINK_ERROR = re.compile(r"^(ld: .*|Undefined symbols.*|clang: error: .*)$")
 PROGRESS = re.compile(r"^\[(\d+)/(\d+)\]")
+UNDEFINED = re.compile(r'^  "(.+)", referenced from:$')
+REFERENCED_BY = re.compile(r"^      (.+?) in (\S+)$")
 
 
 def kind(message):
@@ -33,10 +37,22 @@ def main(argv):
 
     failures = []            # [target, first error or None]
     kinds = collections.Counter()
+    undefined = {}           # symbol -> first referencing object
+    pending_symbol = None
     total = 0
     with open(log_path, errors="replace") as log:
         for line in log:
             line = line.rstrip("\n")
+            symbol = UNDEFINED.match(line)
+            if symbol:
+                pending_symbol = symbol.group(1)
+                undefined.setdefault(pending_symbol, "?")
+                continue
+            if pending_symbol:
+                ref = REFERENCED_BY.match(line)
+                if ref and undefined[pending_symbol] == "?":
+                    undefined[pending_symbol] = ref.group(2)
+                pending_symbol = None
             progress = PROGRESS.match(line)
             if progress:
                 total = int(progress.group(2))
@@ -67,6 +83,11 @@ def main(argv):
         print("[g55] errors by kind (count, message with names blanked):")
         for message, count in kinds.most_common(40):
             print(f"  {count:4}  {message}")
+    if undefined:
+        print(f"[g55] undefined symbols at link: {len(undefined)}")
+        for symbol, obj in sorted(undefined.items()):
+            obj = re.sub(r"^.*?CMakeFiles/[^/]+\.dir/", "", obj)
+            print(f"  {symbol}  <- {obj}")
     return 0
 
 

@@ -10,7 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Spike 1 of the 5.5 rebase (`dev/spike/g55/`, record in its `NOTES.md`):
-  macTAK's 37 engine patches ported to `TAK-Product-Center/atak-civ`
+  the 5.5 engine (takkernel 8.30.5) compiles and links on macOS arm64
+  without 3D Tiles, 471 of 471 build steps on `macos-26`. 5.5 also
+  compiles the GLTF and ASSIMP readers on every platform and adds an MS
+  Access reader and libcurl, so the build takes tinygltf and
+  tinygltfloader from upstream's own tree and assimp, mdbtools, glib and
+  curl from Homebrew. macTAK's 37 engine patches ported to `TAK-Product-Center/atak-civ`
   5.5.1.10 as a 34-patch series that applies at `--fuzz=0` (17
   unchanged, 1 refreshed, 16 hand-ported; `cpp17-legacy-headers`,
   `megatexture-sharetile-comma-operator` and `terraintile-ecef-ge`

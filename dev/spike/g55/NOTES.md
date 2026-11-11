@@ -10,7 +10,41 @@ untouched. The re-pin is a later step.
 
 ## Result
 
-RESULT_PLACEHOLDER
+**Yes.** On `macos-26` (Xcode 26 toolchain, Homebrew GDAL 3.13.3), the
+5.5 engine with macTAK's 5.5 patch series compiles and links: run
+[42970368105](https://github.com/matteskes/macTAK/actions/runs/42970368105),
+
+```text
+[g55]   applied 34 patches
+[g55] build steps: 471, failed: 0
+[g55] PASS: libtakengine.dylib linked from the 5.5 tree
+```
+
+Build step 2 min 16 s at `-j3`; Homebrew install 3–5 min. Everything the
+first run found was the build wrapper's, not the engine's: no 5.5 source
+needed a code change beyond the ported series. Five runs got there:
+
+| Run | Failed | What | Fix in `build-engine.sh` |
+|---|---|---|---|
+| [1](https://github.com/matteskes/macTAK/actions/runs/42965249188) | 5 of 471 | `GLTFv1.cpp`, `GLTFv2.cpp`, `ASSIMPSceneSpi.cpp`: headers missing; `mdbtools.h` needs `glib.h`; `ZipFile.cpp` uses `libkml_unzStringFileNameCompare` | The three headers (below), glib's include dirs, one more minizip rename |
+| [2](https://github.com/matteskes/macTAK/actions/runs/42967023061) | 1 | `tiny_gltf_loader.h` includes `./json.hpp` | Copy the loader's own `json.hpp` |
+| [3](https://github.com/matteskes/macTAK/actions/runs/42968123734) | link | Undefined symbols, listed only in the artifact | `summarize-build.py` prints them |
+| [4](https://github.com/matteskes/macTAK/actions/runs/42969247994) | link | `curl_escape`, `curl_free` (`URIOfflineCache.cpp`); `g_malloc`, `g_malloc0`, `g_free` (`mdbtools.h` inlines) | Link libcurl and glib |
+| [5](https://github.com/matteskes/macTAK/actions/runs/42970368105) | 0 | — | — |
+
+What 5.5 asks of the build beyond 4.6:
+
+| New need | Where | Taken from |
+|---|---|---|
+| tinygltf, tinygltfloader, assimp headers | `formats/gltf/GLTFv1.cpp`, `GLTFv2.cpp`, `model/ASSIMPSceneSpi.cpp`, which 4.6 wrapped in `#ifdef MSVC` and 5.5 compiles on every platform | tinygltf: upstream's `depends/tinygltf-2.4.1-mod.tar.gz` (Git LFS); tinygltfloader: upstream's in-tree `takengine/thirdparty/tinygltfloader`; assimp: Homebrew 6.0.5 (upstream builds a patched 4.0.1). The LFS tarball and the in-tree copy are upstream's own inputs at the pinned commit, so nothing enters this repo |
+| libmdb (+ glib) | `formats/msaccess/MDBAccessDatabaseProvider.cpp`, a new MS Access reader | Homebrew `mdbtools`, `glib` |
+| libcurl | `URIOfflineCache.cpp` | macOS SDK / Homebrew |
+| `libkml_unzStringFileNameCompare` | `util/ZipFile.cpp` | One more line in the minizip rename list |
+| cesium-native, draco | `formats/c3dt/` (3D Tiles) | Left out, as planned |
+
+Still unanswered, on purpose: whether it *runs*. No test, canary or JVM
+load was attempted; the JNI glue and the gates are the next iteration
+(Exit).
 
 ## Reproduce
 
@@ -38,7 +72,7 @@ required check; a red run is the spike's answer, as G0's was
 | `refresh-patches.py` | Sorts the 4.6 series against a 5.5 tree, stacked in build order: clean, refreshed, review, upstream, failed |
 | `patches/` | The 5.5 series: 34 patches, applying at `--fuzz=0` in `build-native.sh`'s order (`gdal-drift-*` first, then sorted) |
 | `build-engine.sh` | The core-engine half of `build-native.sh` against a 5.5 checkout; `formats/c3dt` left out; `ninja -k 0` |
-| `summarize-build.py` | Every failing source with its first error, plus the errors grouped by kind |
+| `summarize-build.py` | Every failing source with its first error, the errors grouped by kind, and the undefined symbols of a failed link |
 
 ## The patch port
 
@@ -126,4 +160,28 @@ lookups.
 
 ## Exit
 
-EXIT_PLACEHOLDER
+The question this spike asked, whether 5.5's engine builds on macOS
+without 3D Tiles, is answered yes, in one day of work, most of it the
+patch port. What remains before the re-pin (study step 4), in order,
+with estimates made from this spike's pace:
+
+1. **JNI glue on 5.5** (2–3 days). Regenerate the pinned javah headers
+   (`dev/g1/gen-jni-headers.sh`) from the 5.5 jars; drop `jni/c3dt` and
+   `jni/interop/formats/c3dt` as `build-native.sh` drops `/c3dt/` today;
+   extend the guard series to the class-inits 5.5 added (above); rebuild
+   `dev/g1/jni-tests` and the JVM load canary. The engine jar and the
+   android-port transplant need their 5.5 builds (with `SHA256SUMS`, per
+   CONTRIBUTING).
+2. **The render gates on 5.5** (2–4 days). `make test-render` against
+   ANGLE: the engine shadows (`GLQuadTileNode4` and the rest) regenerate
+   from the 5.5 patches, and `KHR_debug` decides whether
+   `GLBatchGeometryRenderer4` needs the attrib guards
+   `GLBatchGeometryRenderer3` had.
+3. **Spike 2, commo on 5.5** (study step 2; 3–5 days): the QUIC backend
+   decision.
+4. **The re-pin** (1–2 days): fold `build-engine.sh`'s wrapper changes into
+   `build-native.sh`, move `dev/spike/g55/patches` to `dev/g1/patches`,
+   and change the 14 files that name `889eee2`.
+
+Roughly two to three weeks to a 5.5 baseline with today's gates green,
+3D Tiles still out.

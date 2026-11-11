@@ -50,7 +50,9 @@ iteration below answers it for the JVM half.
 **It loads and runs.** The 5.5 glue (`libtakenginejni`) builds next to
 the engine (624 of 624 steps); the G1 load canary passes on JDK 21
 (Java → glue → C++ `Database2` → sqlite → `42`), and G1's JNI guard
-tests pass in both modes, 7 guards-mode and 6 kernel-mode:
+tests pass in both modes, 7 guards-mode and 6 kernel-mode. The same on
+`macos-26` in CI, jar build and header-drift check included (13 min 33 s):
+run [43041239149](https://github.com/Chicago-Offline/macTAK/actions/runs/43041239149),
 
 ```text
 [g55]   applied 37 patches

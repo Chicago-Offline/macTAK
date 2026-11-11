@@ -166,6 +166,7 @@ build-shell:
 # after the first presented frame; the readback PNG is the artifact.
 test-shell: build-shell
 	bash dev/g2/shell/run.sh --out dev/g2/build/shell-frame.png
+	bash dev/g2/shell/test/exit-code.sh
 
 # M3.0 manual gate (dev Mac, GUI session): `angle` stages the ANGLE pair and
 # runs the headless pbuffer canary first, then the window opens for ~3 s and

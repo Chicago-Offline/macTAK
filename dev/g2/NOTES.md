@@ -1071,12 +1071,11 @@ fixed on its own branch, in this order.
 | 5 | Low | `shell/run.sh` leaks its scratch `MACTAK_HOME` every run: the `EXIT` trap never fires after `exec` | **Fixed** (branch `g2/shell-run-scratch-cleanup`): no `exec`, guarded by `dev/check-trap-exec.sh` |
 | 6 | Low | A value option given last crashes the Swift shell (array index out of range); `RenderSmoke` dies with a stack trace instead of usage | **Fixed** (branch `g2/cli-missing-value`), guarded by `shell/test/args.sh` and `render/test/args.sh` |
 | 7 | Low | `WindowApp.teardown` skips EGL destroy when it fails before the context exists; `BitmapRegionDecoder` leaks its file stream; `Canvas.save`/`restore` does not cover the clip; `fetch-angle.sh` pipes `otool` into `grep -q` under `pipefail` (the trap `env.sh` documents); the GLES shim does not bounds-check array offsets | Open |
+| 8 | High | The Swift shell exited 0 whatever the render did: AppKit's `terminate` ends the process itself, so the code that read `WindowApp`'s exit code never ran and `make test-shell` could not fail | **Fixed** (branch `g2/shell-exit-code`): `applicationWillTerminate` exits with the code, guarded by `shell/test/exit-code.sh` (manual gate) |
 
-Not settled by reading: whether the Swift shell exits non-zero when
-`WindowApp` fails. `NSApp.terminate` normally ends the process itself;
-§M3.2 quotes `exiting with WindowApp's code 0` from a passing run, which
-does not distinguish the two. A failing `make test-shell` run on a dev
-Mac, followed by `echo $?`, would.
+Settled on the bench (2026-11-10): the reading left open whether the
+Swift shell exits non-zero when `WindowApp` fails. It did not; that is
+finding #8, trap #56. #7 is on hold by the owner's call.
 
 Traps found on the way (continuing G2 numbering):
 
@@ -1152,6 +1151,21 @@ Traps found on the way (continuing G2 numbering):
   each of its 15 value options last (CI's shell-compile job; parsing
   ends before the JVM or a window exists), and `render/test/args.sh`
   runs six bad invocations through `render/run.sh` (CI's render job).
+- **#56 — `NSApp.terminate` never returns to `main`.** The shell ended
+  with `app.run()` followed by "read `WindowApp.exitCode()`, print it,
+  `exit` with it". But once `applicationShouldTerminate` answers
+  `.terminateNow`, `-[NSApplication terminate:]` posts
+  `applicationWillTerminate` and calls `exit(0)` itself, so `run()` does
+  not return and those lines never ran. Every run exited 0: a missing
+  basemap (`WindowApp` code 2), a failed render (1) and an EGL failure
+  (3) all read as success, and `make test-shell` could not fail. The
+  tell was already in a passing run: no `exiting with WindowApp's code`
+  line after `poll → 2`. **Guard:** the shell implements
+  `applicationWillTerminate` and exits there with `WindowApp`'s code, on
+  every quit path. `shell/test/exit-code.sh`, now the second leg of
+  `make test-shell`, runs a basemap that does not exist and requires
+  exit 2. It opens a window, so it is a dev-Mac gate like the first
+  leg; CI compiles the shell only.
 
 Evidence for #1 (CI, render job, ANGLE Metal on a hosted runner).
 Before: the canary alone on `be59312`, old gate (dispatch run
@@ -1263,4 +1277,32 @@ After: with the fixes, on `8be7765` (PR #93, run 42919519530):
 [shell-args] PASS: every value option reports a missing value
 [render-args] ok   --frames many
 [render-args] PASS: bad arguments end in usage, exit 2
+```
+
+Evidence for #8 (dev Mac, M5 Max, GUI session; `main` at `e51f14a`).
+Before, a basemap that does not exist:
+
+```text
+$ bash dev/g2/shell/run.sh --basemap /nonexistent.mbtiles; echo "exit=$?"
+window-app: no such basemap: /nonexistent.mbtiles
+mactak-shell: poll → 2
+mactak-shell: render failed — closing the window
+exit=0
+```
+
+After, on branch `g2/shell-exit-code` (`9ddd87c`), same Mac,
+`make test-shell; echo "exit=$?"`. The first leg renders and passes as
+before and now reports its code, where it used to stop at `poll → 2`;
+the second leg is the canary:
+
+```text
+mactak-shell: linger elapsed — asking the render thread to wind down
+mactak-shell: poll → 2
+mactak-shell: exiting with WindowApp's code 0
+bash dev/g2/shell/test/exit-code.sh
+    window-app: no such basemap: /nonexistent.mbtiles
+    mactak-shell: render failed — closing the window
+    mactak-shell: exiting with WindowApp's code 2
+[shell-exit] PASS: a failed render exits 2
+exit=0
 ```

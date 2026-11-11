@@ -78,6 +78,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The Swift shell exits with the render's exit code (`dev/g2/NOTES.md`
+  §G2.5, trap #56, G2 correctness audit #8). It exited 0 on every run:
+  AppKit's `terminate` ends the process itself, so the lines after
+  `app.run()` that read `WindowApp`'s code never ran, and a failed
+  render, a missing basemap and an EGL failure all read as success.
+  The shell now exits from `applicationWillTerminate` with that code.
+  `dev/g2/shell/test/exit-code.sh`, the new second leg of
+  `make test-shell`, requires exit 2 for a basemap that does not exist.
+
 - A missing or malformed option value is a usage error, exit 2
   (`dev/g2/NOTES.md` §G2.5, trap #55, G2 correctness audit #6). The
   Swift shell crashed in an array-index trap when a value option came

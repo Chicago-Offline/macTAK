@@ -9,6 +9,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Spike 1 of the 5.5 rebase (`dev/spike/g55/`, record in its `NOTES.md`):
+  macTAK's 37 engine patches ported to `TAK-Product-Center/atak-civ`
+  5.5.1.10 as a 34-patch series that applies at `--fuzz=0` (17
+  unchanged, 1 refreshed, 16 hand-ported; `cpp17-legacy-headers`,
+  `megatexture-sharetile-comma-operator` and `terraintile-ecef-ge`
+  dropped as fixed upstream). `refresh-patches.py` sorts a series
+  against a new tree and accepts a fuzzed hunk only when its context
+  survives; `build-engine.sh` builds the 5.5 engine without 3D Tiles
+  (`formats/c3dt`) under `ninja -k 0` and lists every failing source;
+  `.github/workflows/spike-55.yml` runs it on `macos-26` (not a
+  required check). The port found that 5.5's own fix for the
+  `GLMegaTexture` use-after-free (G2 trap 10) hangs once a tile is
+  shared, so the 5.5 series keeps macTAK's version.
+
 - `docs/atak-feature-coverage.md`: ATAK-CIV's feature set at the 4.6 pin
   mapped to what macTAK supports today (working, in the engine but unwired,
   to build, or platform-bound), with the app-layer numbers behind the open
@@ -22,6 +36,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   apply cleanly, 9 with fuzz and 11 fail (2 because upstream fixed the
   same bug); the commo TLS server-purpose patch (G1 security #1) still
   applies and is still needed. Recommends rebasing in stages before G3.
+  (Spike 1 corrected the patch counts: the fuzz-3 dry-runs misplaced
+  hunks, and `glbatchshaders-dead-store` is not upstream.)
   The roadmap (G3, G6, risk R8), the pathway-c risk register (R7) and the
   CONTRIBUTING reading order point to both docs.
 

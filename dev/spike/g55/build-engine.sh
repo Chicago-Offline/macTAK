@@ -12,6 +12,12 @@
 #   → libtakengine.dylib, or the list of what failed to compile
 #
 # Differences from build-native.sh, each a spike decision (NOTES.md):
+#   - 5.5 compiles the GLTF readers and the ASSIMP scene SPI on every
+#     platform (4.6 wrapped them in #ifdef MSVC), so they need their
+#     headers: tinygltf from upstream's own depends/tinygltf-2.4.1-mod
+#     tarball (Git LFS), tinygltfloader from upstream's in-tree
+#     takengine/thirdparty copy, assimp from Homebrew (upstream builds a
+#     patched 4.0.1)
 #   - formats/c3dt/ (cesium-native + draco, 3D Tiles) is left out, as G0
 #     left out the LAS drivers; MacOSSources.cmake has no cesium-native
 #     or draco paths, so a stock 5.5 macOS build cannot compile it
@@ -20,7 +26,9 @@
 #
 # usage: build-engine.sh UPSTREAM_55
 #        UPSTREAM_55  root of an atak-civ checkout at 5.5.1.10 (needs
-#                     takkernel/engine/src/main and khronos/)
+#                     takkernel/engine/src/main, khronos/,
+#                     takengine/thirdparty/tinygltfloader/ and the LFS
+#                     content of depends/tinygltf-2.4.1-mod.tar.gz)
 # out:   dev/spike/g55/build/build.log    full compiler output
 #        dev/spike/g55/build/summary.txt  failing sources, first error each
 # exit:  0 libtakengine linked; 1 compile or link failures; 2 usage or
@@ -39,6 +47,8 @@ die() { printf '\n[g55] FATAL: %s\n' "$*" >&2; exit 2; }
 UPSTREAM="$(cd "$1" && pwd)" || die "no such directory: $1"
 ENGINE_MAIN="$UPSTREAM/takkernel/engine/src/main"
 KHRONOS="$UPSTREAM/khronos"
+TINYGLTF_TGZ="$UPSTREAM/depends/tinygltf-2.4.1-mod.tar.gz"
+TINYGLTFLOADER="$UPSTREAM/takengine/thirdparty/tinygltfloader"
 
 # --- preflight -----------------------------------------------------------
 [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]] \
@@ -48,13 +58,17 @@ for t in cmake ninja rsync clang patch python3 brew; do
 done
 [[ -d "$ENGINE_MAIN/cpp" ]] || die "no 5.5 engine at $ENGINE_MAIN"
 [[ -f "$KHRONOS/OpenGL/api/GLES3/gl3.h" ]] || die "no khronos headers at $KHRONOS"
-# build-native.sh's list + mdbtools: 5.5 adds an MS Access database
-# provider (formats/msaccess) that links libmdb
-for f in proj geos gdal libspatialite minizip nlohmann-json libxml2 mdbtools; do
+[[ -f "$TINYGLTFLOADER/tiny_gltf_loader.h" ]] || die "no tinygltfloader at $TINYGLTFLOADER"
+gzip -t "$TINYGLTF_TGZ" 2>/dev/null \
+  || die "$TINYGLTF_TGZ is missing or an LFS pointer — git lfs pull --include=depends/tinygltf-2.4.1-mod.tar.gz"
+# build-native.sh's list + mdbtools (5.5's MS Access provider,
+# formats/msaccess, links libmdb; its header includes glib's) + assimp
+for f in proj geos gdal libspatialite minizip nlohmann-json libxml2 mdbtools glib assimp; do
   brew list --versions "$f" >/dev/null 2>&1 \
     || die "brew formula missing: $f
-       → brew install proj geos gdal libspatialite minizip nlohmann-json libxml2 mdbtools ninja"
+       → brew install proj geos gdal libspatialite minizip nlohmann-json libxml2 mdbtools glib assimp ninja"
 done
+GLIB="$(brew --prefix glib)"
 log "preflight ok (upstream=$UPSTREAM, -j$JOBS)"
 
 # --- work tree -----------------------------------------------------------
@@ -83,7 +97,17 @@ clang -arch arm64 -dynamiclib -O2 \
   -I"$KHRONOS/OpenGL/api" -I"$KHRONOS/EGL/api" \
   -o "$WORK/gles-stub/libGLESv2.dylib" "$DEV/g2/jni-extra/mactak_gles_stub.c"
 
-cp "$(brew --prefix nlohmann-json)/include/nlohmann/json.hpp" "$WORK/overlay/tinygltf/json.hpp"
+log "third-party headers: tinygltf (upstream tarball), tinygltfloader (in-tree)"
+mkdir -p "$WORK/tinygltf-src" "$WORK/overlay/tinygltfloader"
+tar xzf "$TINYGLTF_TGZ" -C "$WORK/tinygltf-src"
+tiny_gltf_h="$(find "$WORK/tinygltf-src" -name tiny_gltf.h -print -quit)"
+[[ -n "$tiny_gltf_h" ]] || die "no tiny_gltf.h in $(basename "$TINYGLTF_TGZ")"
+cp "$(dirname "$tiny_gltf_h")"/*.h "$WORK/overlay/tinygltf/"
+# the engine includes <tinygltf/json.hpp> directly; tinygltf's own copy if
+# it ships one, else nlohmann-json (G0's stand-in)
+json_hpp="$(find "$WORK/tinygltf-src" -name json.hpp -print -quit)"
+cp "${json_hpp:-$(brew --prefix nlohmann-json)/include/nlohmann/json.hpp}" "$WORK/overlay/tinygltf/json.hpp"
+cp "$TINYGLTFLOADER"/*.h "$WORK/overlay/tinygltfloader/"
 
 log "generating wrapper CMakeLists"
 cat > "$WORK/CMakeLists.txt" <<CMAKE
@@ -103,6 +127,8 @@ target_include_directories(takengine PRIVATE
     $KHRONOS/OpenGL/api
     $KHRONOS/EGL/api
     $WORK/overlay
+    $GLIB/include/glib-2.0       # mdbtools.h includes glib.h
+    $GLIB/lib/glib-2.0/include   # glibconfig.h
 )
 target_link_directories(takengine PRIVATE /opt/homebrew/lib)
 
@@ -118,6 +144,7 @@ target_compile_definitions(takengine PRIVATE
     libkml_unzGoToNextFile=unzGoToNextFile
     libkml_unzLocateFile=unzLocateFile
     libkml_unzGetCurrentFileInfo=unzGetCurrentFileInfo
+    libkml_unzStringFileNameCompare=unzStringFileNameCompare   # new in 5.5 (util/ZipFile.cpp)
 )
 target_link_libraries(takengine PRIVATE minizip)
 
@@ -138,7 +165,8 @@ list(REMOVE_ITEM _libs las las_c charset GLESv2)
 list(APPEND _libs
     $WORK/gles-stub/libGLESv2.dylib
     /opt/homebrew/opt/sqlite/lib/libsqlite3.dylib
-    /opt/homebrew/opt/libxml2/lib/libxml2.dylib)
+    /opt/homebrew/opt/libxml2/lib/libxml2.dylib
+    assimp)
 set_target_properties(takengine PROPERTIES LINK_LIBRARIES "\${_libs}")
 CMAKE
 

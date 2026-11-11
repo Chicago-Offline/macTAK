@@ -37,28 +37,35 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check out TAK-Product-Center/atak-civ 5.5.1.10 (engine and khronos only)
+      - name: Check out TAK-Product-Center/atak-civ 5.5.1.10 (engine, khronos, GLTF headers)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: TAK-Product-Center/atak-civ
           ref: 9f6893dd657feacc35ec5de03dad721c2e44170e # 5.5.1.10, the commit the rebase study measured
           path: upstream-55
           fetch-depth: 1
+          # depends/ holds Git LFS pointers; only the tinygltf tarball is
+          # pulled below (the others include GDAL 2 and assimp sources)
           sparse-checkout: |
             takkernel/engine/src/main
             khronos
+            takengine/thirdparty/tinygltfloader
+            depends
           persist-credentials: false
+
+      - name: Pull the tinygltf tarball from Git LFS
+        run: git -C upstream-55 lfs pull --include=depends/tinygltf-2.4.1-mod.tar.gz
 
       - name: Install engine dependencies (Homebrew)
         env:
           HOMEBREW_NO_AUTO_UPDATE: '1'
           HOMEBREW_NO_INSTALL_CLEANUP: '1'
         # ci.yml's native-engine list minus the test/commo-only formulae,
-        # plus ninja (build-engine.sh uses -k 0) and mdbtools (5.5's MS
-        # Access provider links libmdb)
+        # plus ninja (build-engine.sh uses -k 0), mdbtools and glib (5.5's
+        # MS Access provider) and assimp (5.5's ASSIMP scene SPI)
         run: >
           brew install cmake ninja rsync proj geos gdal libspatialite minizip nlohmann-json
-          libxml2 mdbtools
+          libxml2 mdbtools glib assimp
 
       - name: Build the 5.5 engine (dev/spike/g55/build-engine.sh)
         run: bash dev/spike/g55/build-engine.sh upstream-55

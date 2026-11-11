@@ -15,10 +15,11 @@ RESULT_PLACEHOLDER
 ## Reproduce
 
 ```sh
-brew install cmake ninja rsync proj geos gdal libspatialite minizip nlohmann-json libxml2 mdbtools
+brew install cmake ninja rsync proj geos gdal libspatialite minizip nlohmann-json libxml2 mdbtools glib assimp
 git clone --filter=blob:none --no-checkout https://github.com/TAK-Product-Center/atak-civ ../atak-civ
-git -C ../atak-civ sparse-checkout set takkernel/engine/src/main khronos
+git -C ../atak-civ sparse-checkout set takkernel/engine/src/main khronos takengine/thirdparty/tinygltfloader depends
 git -C ../atak-civ checkout 9f6893dd657feacc35ec5de03dad721c2e44170e
+git -C ../atak-civ lfs pull --include=depends/tinygltf-2.4.1-mod.tar.gz
 bash dev/spike/g55/build-engine.sh ../atak-civ
 # re-sort the 4.6 series against a 5.5 tree (writes clean + refreshed only):
 python3 dev/spike/g55/refresh-patches.py ../atak-civ/takkernel/engine/src/main /tmp/out

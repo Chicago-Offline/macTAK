@@ -166,7 +166,9 @@ list(APPEND _libs
     $WORK/gles-stub/libGLESv2.dylib
     /opt/homebrew/opt/sqlite/lib/libsqlite3.dylib
     /opt/homebrew/opt/libxml2/lib/libxml2.dylib
-    assimp)
+    assimp
+    curl                               # new in 5.5: util URIOfflineCache
+    $GLIB/lib/libglib-2.0.dylib)       # mdbtools.h's inline g_malloc/g_free
 set_target_properties(takengine PROPERTIES LINK_LIBRARIES "\${_libs}")
 CMAKE
 
